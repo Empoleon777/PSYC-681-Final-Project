@@ -58,9 +58,6 @@ class MultiTaskTrainer(Trainer):
 
         facet_labels = facet_labels.float()
 
-        pos_weight_domain = torch.tensor([...], device=domain_labels.device)
-        pos_weight_facet = torch.tensor([...], device=facet_labels.device)
-
         bce_domain = nn.BCEWithLogitsLoss(
             pos_weight=self.pos_weight_domain.to(domain_labels.device)
         )
