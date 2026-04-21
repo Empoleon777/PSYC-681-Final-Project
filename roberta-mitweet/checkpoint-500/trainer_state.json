@@ -11,9 +11,9 @@
   "log_history": [
     {
       "epoch": 1.0,
-      "eval_runtime": 9.4821,
-      "eval_samples_per_second": 265.657,
-      "eval_steps_per_second": 16.663,
+      "eval_runtime": 9.6218,
+      "eval_samples_per_second": 261.802,
+      "eval_steps_per_second": 16.421,
       "step": 473
     },
     {
