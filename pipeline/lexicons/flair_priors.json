@@ -1,0 +1,55 @@
+{
+  "flair_rules": [
+    {
+      "name": "conservative",
+      "patterns": ["conservative", "maga", "gop", "republican", "right libertarian"],
+      "zecon": 0.8,
+      "zsoc": 0.7,
+      "confidence": 0.85
+    },
+    {
+      "name": "liberal",
+      "patterns": ["liberal", "progressive", "democrat", "leftist", "social democrat"],
+      "zecon": -0.7,
+      "zsoc": -0.7,
+      "confidence": 0.85
+    },
+    {
+      "name": "libertarian",
+      "patterns": ["libertarian", "classical liberal", "anarcho-capitalist"],
+      "zecon": 0.9,
+      "zsoc": -0.3,
+      "confidence": 0.8
+    },
+    {
+      "name": "socialist",
+      "patterns": ["socialist", "communist", "democratic socialist"],
+      "zecon": -0.9,
+      "zsoc": -0.2,
+      "confidence": 0.8
+    }
+  ],
+  "self_declaration_rules": [
+    {
+      "name": "self_decl_conservative",
+      "patterns": ["i am conservative", "i'm conservative", "as a conservative", "i lean right"],
+      "zecon": 0.75,
+      "zsoc": 0.7,
+      "confidence": 0.8
+    },
+    {
+      "name": "self_decl_liberal",
+      "patterns": ["i am liberal", "i'm liberal", "as a liberal", "i lean left", "progressive here"],
+      "zecon": -0.7,
+      "zsoc": -0.7,
+      "confidence": 0.8
+    },
+    {
+      "name": "self_decl_libertarian",
+      "patterns": ["i am libertarian", "i'm libertarian", "as a libertarian"],
+      "zecon": 0.85,
+      "zsoc": -0.2,
+      "confidence": 0.78
+    }
+  ]
+}

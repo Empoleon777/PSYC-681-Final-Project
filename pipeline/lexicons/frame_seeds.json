@@ -1,0 +1,39 @@
+{
+  "frames": [
+    {
+      "label": "economic_freedom",
+      "keywords": ["free market", "regulation burden", "small government", "tax burden"],
+      "required_context": ["economy", "business", "jobs", "inflation", "growth"],
+      "zecon": 0.8,
+      "zsoc": 0.1
+    },
+    {
+      "label": "economic_redistribution",
+      "keywords": ["wealth tax", "worker protections", "public investment", "social safety net"],
+      "required_context": ["inequality", "wages", "healthcare", "housing", "public services"],
+      "zecon": -0.8,
+      "zsoc": -0.1
+    },
+    {
+      "label": "law_and_order",
+      "keywords": ["crime", "border security", "policing", "punishment", "enforcement"],
+      "required_context": ["safety", "public order", "illegal", "secure"],
+      "zecon": 0.1,
+      "zsoc": 0.8
+    },
+    {
+      "label": "civil_rights",
+      "keywords": ["civil liberties", "rights", "freedom of speech", "privacy", "equal rights"],
+      "required_context": ["constitutional", "access", "justice", "protection"],
+      "zecon": -0.1,
+      "zsoc": -0.8
+    },
+    {
+      "label": "environmental_protection",
+      "keywords": ["climate", "emissions", "clean energy", "renewables", "pollution"],
+      "required_context": ["regulation", "public health", "transition", "carbon"],
+      "zecon": -0.5,
+      "zsoc": -0.3
+    }
+  ]
+}
