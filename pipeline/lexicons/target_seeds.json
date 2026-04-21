@@ -1,0 +1,24 @@
+{
+  "targets": [
+    {
+      "label": "government_institutions",
+      "keywords": ["congress", "senate", "supreme court", "white house", "government"],
+      "required_context": ["policy", "bill", "law", "vote", "rule", "regulation"]
+    },
+    {
+      "label": "political_party_or_actor",
+      "keywords": ["democrats", "republicans", "gop", "biden", "trump", "party"],
+      "required_context": ["agenda", "platform", "campaign", "election", "policy", "vote"]
+    },
+    {
+      "label": "policy_or_legislation",
+      "keywords": ["bill", "act", "policy", "legislation", "mandate", "tax"],
+      "required_context": ["pass", "repeal", "support", "oppose", "cost", "impact"]
+    },
+    {
+      "label": "social_group_or_identity",
+      "keywords": ["immigrants", "women", "workers", "minorities", "christians", "lgbtq"],
+      "required_context": ["rights", "protection", "ban", "discrimination", "freedom", "safety"]
+    }
+  ]
+}
