@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Generated pipeline artifacts
+outputs/
+Data/annotation/
+Data/annotation_60k/
+Data/sources/
+
+# Local Postgres scratch data
+/tmp/psyc681_pgdata
