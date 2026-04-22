@@ -117,12 +117,12 @@ python scripts/fold_annotations.py \
 ## Label Definitions
 
 Canonical label schema:
-- [label_schema.md](/Users/jacobkim/PSYC-681-Final-Project/docs/label_schema.md)
+- [label_schema.md](PSYC-681-Final-Project/docs/label_schema.md)
 
 ## B6 Draft
 
 Starter architecture file:
-- [b6_hierarchy_draft.py](/Users/jacobkim/PSYC-681-Final-Project/Models/b6_hierarchy_draft.py)
+- [b6_hierarchy_draft.py](PSYC-681-Final-Project/Models/b6_hierarchy_draft.py)
 
 Notes:
-- [b6_architecture_notes.md](/Users/jacobkim/PSYC-681-Final-Project/docs/b6_architecture_notes.md)
+- [b6_architecture_notes.md](PSYC-681-Final-Project/docs/b6_architecture_notes.md)
