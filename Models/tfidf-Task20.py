@@ -3,8 +3,6 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
-from sklearn.multioutput import MultiOutputClassifier
-from sklearn.multioutput import ClassifierChain
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score
 from scipy.sparse import hstack
