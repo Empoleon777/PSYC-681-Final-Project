@@ -6,7 +6,7 @@ from sklearn.multioutput import MultiOutputClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score
 
-df = pd.read_csv("outputs\annotation_60k\gold_annotations.csv")
+df = pd.read_csv(r"outputs/annotation_60k/gold_annotations.csv")
 
 text = df['text']
 q_cols = [col for col in df.columns if col.startswith("q")]
