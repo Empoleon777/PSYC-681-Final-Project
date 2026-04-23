@@ -9,7 +9,7 @@ from sklearn.metrics import f1_score
 df = pd.read_csv(r"outputs/annotation_60k/gold_annotations.csv")
 
 text = df['text']
-q_cols = [col for col in df.columns if col.startswith("q")]
+q_cols = df[['q1_relevance', 'q07_economic_direction', 'q08_social_direction']]
 y = df[q_cols].values
 
 train_text, test_text, q_train, q_test= train_test_split(text, y, test_size=0.2, random_state=42)
