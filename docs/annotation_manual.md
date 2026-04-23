@@ -37,6 +37,8 @@ Stratify by:
 
 Build packets with:
 - `python scripts/make_annotation_batch.py`
+- Default output is prefilled with weak-label suggestions for `q01..q12`.
+- Add `--blank-fields` to produce an empty template if needed.
 
 ## Quality Checks
 
