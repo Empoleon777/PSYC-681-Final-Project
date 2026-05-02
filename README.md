@@ -106,6 +106,9 @@ python scripts/make_annotation_batch.py \
   --output-dir Data/annotation_60k
 ```
 
+By default, the annotation packet is seeded with weak-label suggestions (`q01..q12`) so batches are not blank.
+Use `--blank-fields` if you want empty annotation fields instead.
+
 Fold three annotator files into aggregate outputs:
 
 ```bash
