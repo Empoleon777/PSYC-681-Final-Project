@@ -80,7 +80,7 @@ def tokenize(example):
 
 def add_labels(example):
     return {
-        "relevance_labels": example["q1_relevance"],
+        "relevance_labels": example["q01_relevance"],
         "econ_labels": example["q07_economic_direction"],
         "social_labels": example["q08_social_direction"],
     }
@@ -113,12 +113,13 @@ model_name = "roberta-base"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
     
 dataset = load_dataset("csv", data_files=r"outputs/annotation_60k/gold_annotations.csv")
+dataset = dataset["train"]
 dataset = dataset.map(add_labels)
 dataset = dataset.map(tokenize)
 dataset = dataset.train_test_split(test_size=0.2, seed=42)
 train_data = dataset["train"]
 test_data = dataset["test"]
-train_valid = train_data.train_test_split(test_size=0.25)
+train_valid = train_data.train_test_split(test_size=0.1)
 train_data = train_valid["train"]
 valid_data = train_valid["test"]
 
