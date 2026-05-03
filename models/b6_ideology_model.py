@@ -1,7 +1,4 @@
-"""Draft B6 hierarchy model.
-
-This is a working architecture draft, not a finished training implementation.
-"""
+"""B6 hierarchical ideology model."""
 
 from __future__ import annotations
 
@@ -10,13 +7,15 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoModel
+from transformers import AutoModel, RobertaConfig, RobertaModel
 
 
-class B6HierarchyDraft(nn.Module):
+class B6HierarchyModel(nn.Module):
     def __init__(
         self,
         encoder_name: str = "roberta-base",
+        load_pretrained: bool = True,
+        vocab_size: int = 30522,
         num_targets: int = 7,
         num_stances: int = 3,
         num_frames: int = 9,
@@ -24,7 +23,18 @@ class B6HierarchyDraft(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.encoder = AutoModel.from_pretrained(encoder_name)
+        if load_pretrained:
+            self.encoder = AutoModel.from_pretrained(encoder_name)
+        else:
+            cfg = RobertaConfig(
+                vocab_size=vocab_size,
+                hidden_size=256,
+                num_hidden_layers=4,
+                num_attention_heads=4,
+                intermediate_size=1024,
+                max_position_embeddings=514,
+            )
+            self.encoder = RobertaModel(cfg)
         hidden = self.encoder.config.hidden_size
 
         # Discourse-level heads.
@@ -125,10 +135,14 @@ class B6HierarchyDraft(nn.Module):
 
 
 if __name__ == "__main__":
-    model = B6HierarchyDraft()
+    model = B6HierarchyModel()
     batch = {
         "input_ids": torch.ones((2, 16), dtype=torch.long),
         "attention_mask": torch.ones((2, 16), dtype=torch.long),
     }
     y = model(**batch)
     print("Forward pass keys:", sorted(y.keys()))
+
+
+# Backwards-compatible alias for older imports.
+B6HierarchyDraft = B6HierarchyModel

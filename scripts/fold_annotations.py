@@ -37,6 +37,8 @@ QUESTION_FIELDS = [
     "q11_confidence",
 ]
 
+REQUIRED_QUESTION_FIELDS = list(QUESTION_FIELDS)
+
 
 def read_csv(path: Path) -> List[Dict[str, str]]:
     with open(path, "r", encoding="utf-8", newline="") as f:
@@ -158,6 +160,11 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/annotation"))
     parser.add_argument("--write-db", action="store_true")
     parser.add_argument("--database-url", type=str, default=os.environ.get("DATABASE_URL", ""))
+    parser.add_argument(
+        "--require-complete-labels",
+        action="store_true",
+        help="Fail if any annotation row has blank required question fields.",
+    )
     args = parser.parse_args()
 
     files = sorted(glob.glob(args.annotation_glob))
@@ -179,10 +186,26 @@ def main() -> None:
 
     aggregate_rows: List[Dict[str, str]] = []
     incomplete = 0
+    rows_with_any_blank = 0
+    field_blank_counts = {field: 0 for field in REQUIRED_QUESTION_FIELDS}
+    posts_with_blank = 0
     for post_id, rows in by_post.items():
         annotators = {r["annotator_id"] for r in rows if r.get("annotator_id")}
         if len(annotators) != 3:
             incomplete += 1
+
+        post_has_blank = False
+        for row in rows:
+            row_blank = False
+            for field in REQUIRED_QUESTION_FIELDS:
+                if row.get(field, "").strip() == "":
+                    field_blank_counts[field] += 1
+                    row_blank = True
+            if row_blank:
+                rows_with_any_blank += 1
+                post_has_blank = True
+        if post_has_blank:
+            posts_with_blank += 1
 
         majority_json = {}
         soft_json = {}
@@ -212,6 +235,9 @@ def main() -> None:
         "posts": len(by_post),
         "annotation_rows": len(all_rows),
         "posts_with_non_3_annotators": incomplete,
+        "rows_with_any_blank_required_field": rows_with_any_blank,
+        "posts_with_any_blank_required_field": posts_with_blank,
+        "blank_counts_by_field": field_blank_counts,
         "input_files": files,
     }
     (args.output_dir / "gold_validation_summary.json").write_text(
@@ -224,8 +250,15 @@ def main() -> None:
             raise SystemExit("DATABASE_URL is required when --write-db is set.")
         upsert_db(args.database_url, all_rows, aggregate_rows)
 
+    if args.require_complete_labels and rows_with_any_blank > 0:
+        raise SystemExit(
+            "Found blank required labels. "
+            "Fix annotation rows or regenerate packet before considering Task 14 complete."
+        )
+
     print(f"Posts aggregated: {len(by_post)}")
     print(f"Incomplete posts (not exactly 3 annotators): {incomplete}")
+    print(f"Rows with blank required fields: {rows_with_any_blank}")
 
 
 if __name__ == "__main__":

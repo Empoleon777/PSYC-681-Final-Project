@@ -1,11 +1,11 @@
 # PSYC-681 Final Project
 
-This repo contains our current working pipeline for:
+This repo contains the project pipeline for:
 
 - Reddit ingestion into a normalized post table
 - weak-label construction from lightweight lexical/rule sources
 - annotation packet creation and aggregation
-- an initial draft of the B6 hierarchical architecture
+- the B6 hierarchical ideology model
 
 ## Data Sources
 
@@ -106,7 +106,7 @@ python scripts/make_annotation_batch.py \
   --output-dir Data/annotation_60k
 ```
 
-By default, the annotation packet is seeded with weak-label suggestions (`q01..q12`) so batches are not blank.
+By default, the annotation packet carries weak-label starting values (`q01..q12`) so reviewers can correct them instead of starting cold.
 Use `--blank-fields` if you want empty annotation fields instead.
 
 Fold three annotator files into aggregate outputs:
@@ -114,18 +114,44 @@ Fold three annotator files into aggregate outputs:
 ```bash
 python scripts/fold_annotations.py \
   --annotation-glob "Data/annotation_60k/annotation_packet_annotator_*.csv" \
-  --output-dir outputs/annotation_60k
+  --output-dir outputs/annotation_60k \
+  --require-complete-labels
 ```
+
+`--require-complete-labels` enforces non-blank `q01..q11` before writing final gold outputs.
 
 ## Label Definitions
 
 Canonical label schema:
 - [label_schema.md](/Users/jacobkim/PSYC-681-Final-Project/docs/label_schema.md)
 
-## B6 Draft
+## B6 Model
 
-Starter architecture file:
-- [b6_hierarchy_draft.py](/Users/jacobkim/PSYC-681-Final-Project/Models/b6_hierarchy_draft.py)
+Architecture file:
+- [b6_ideology_model.py](/Users/jacobkim/PSYC-681-Final-Project/models/b6_ideology_model.py)
+
+Train full representation-learning pipeline (weak pretraining + gold fine-tuning):
+
+```bash
+python scripts/train_b6_representation.py \
+  --raw-posts-csv outputs/ingestion/raw_posts_60k.csv \
+  --weak-labels-csv outputs/weak_labels_60k/post_weak_labels.csv \
+  --gold-aggregates-csv outputs/annotation_60k/gold_aggregates.csv \
+  --output-dir outputs/model_runs/b6_representation \
+  --weak-epochs 1 \
+  --gold-epochs 3 \
+  --gold-loss-mode hybrid
+```
+
+Gold supervision options:
+- `--gold-loss-mode hard`: majority labels only
+- `--gold-loss-mode soft`: annotator distributions only (KL objective for ideology heads)
+- `--gold-loss-mode hybrid`: weighted mix (use `--hybrid-alpha`)
+
+Stage-2 validation also logs an ambiguity-heavy subset slice to support disagreement-aware analysis.
+
+Offline/restricted-network smoke mode:
+- add `--offline-random-init` to avoid downloading pretrained weights/tokenizer.
 
 Notes:
 - [b6_architecture_notes.md](/Users/jacobkim/PSYC-681-Final-Project/docs/b6_architecture_notes.md)
