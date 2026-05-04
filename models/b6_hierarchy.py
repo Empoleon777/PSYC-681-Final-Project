@@ -61,7 +61,7 @@ class B6HierarchyModel(nn.Module):
         self.econ_head = nn.Linear(latent_dim, 3)
         self.social_head = nn.Linear(latent_dim, 3)
         self.intensity_head = nn.Linear(latent_dim, 3)
-        self.ambiguity_head = nn.Linear(latent_dim, 3)
+        self.ambiguity_head = nn.Linear(latent_dim, 1)
 
     def orthogonality_regularization(self) -> torch.Tensor:
         """Encourage decorrelated Level B head directions."""
@@ -77,6 +77,43 @@ class B6HierarchyModel(nn.Module):
         gram = weights @ weights.T
         identity = torch.eye(gram.size(0), device=gram.device)
         return ((gram - identity) ** 2).mean()
+    
+    def compute_loss(self, outputs, labels):
+        loss_dict = {}
+
+        def kl_loss(logits, target_probs):
+            log_probs = F.log_softmax(logits, dim=-1)
+            return F.kl_div(log_probs, target_probs, reduction="batchmean")
+
+        loss_econ = kl_loss(outputs["econ_logits"], labels["econ_dist"])
+        loss_social = kl_loss(outputs["social_logits"], labels["social_dist"])
+        loss_intensity = kl_loss(outputs["intensity_logits"], labels["intensity_dist"])
+
+        p = labels["econ_dist"]
+        entropy = -(p * torch.log(p + 1e-8)).sum(dim=-1)
+
+        bins = torch.bucketize(entropy, torch.tensor([0.5, 1.0], device=entropy.device))
+        ambiguity_target = F.one_hot(bins, num_classes=3).float()
+
+        loss_amb = kl_loss(outputs["ambiguity_logits"], ambiguity_target)
+
+        total_loss = (
+            loss_econ
+            + loss_social
+            + loss_intensity
+            + 0.5 * loss_amb
+            + 0.1 * outputs["orthogonality_loss"]
+        )
+
+        loss_dict.update({
+            "loss": total_loss,
+            "econ": loss_econ,
+            "social": loss_social,
+            "intensity": loss_intensity,
+            "ambiguity": loss_amb,
+        })
+
+        return loss_dict
 
     def forward(
         self,
@@ -131,6 +168,10 @@ class B6HierarchyModel(nn.Module):
             out["stance_h"] = stance_h
             out["frame_h"] = frame_h
 
+        if labels is not None:
+            loss_dict = self.compute_loss(out, labels)
+            out.update(loss_dict)
+
         return out
 
 
@@ -141,8 +182,12 @@ if __name__ == "__main__":
         "attention_mask": torch.ones((2, 16), dtype=torch.long),
     }
     y = model(**batch)
+<<<<<<<< HEAD:models/b6_ideology_model.py
     print("Forward pass keys:", sorted(y.keys()))
 
 
 # Backwards-compatible alias for older imports.
 B6HierarchyDraft = B6HierarchyModel
+========
+    print("Forward pass keys:", sorted(y.keys()))
+>>>>>>>> origin/main:models/b6_hierarchy.py

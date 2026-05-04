@@ -123,10 +123,11 @@ python scripts/fold_annotations.py \
 ## Label Definitions
 
 Canonical label schema:
-- [label_schema.md](/Users/jacobkim/PSYC-681-Final-Project/docs/label_schema.md)
+- [label_schema.md](PSYC-681-Final-Project/docs/label_schema.md)
 
 ## B6 Model
 
+<<<<<<< HEAD
 Architecture file:
 - [b6_ideology_model.py](/Users/jacobkim/PSYC-681-Final-Project/models/b6_ideology_model.py)
 
@@ -152,6 +153,10 @@ Stage-2 validation also logs an ambiguity-heavy subset slice to support disagree
 
 Offline/restricted-network smoke mode:
 - add `--offline-random-init` to avoid downloading pretrained weights/tokenizer.
+=======
+Starter architecture file:
+- [b6_hierarchy_draft.py](PSYC-681-Final-Project/Models/b6_hierarchy_draft.py)
+>>>>>>> origin/main
 
 Notes:
-- [b6_architecture_notes.md](/Users/jacobkim/PSYC-681-Final-Project/docs/b6_architecture_notes.md)
+- [b6_architecture_notes.md](PSYC-681-Final-Project/docs/b6_architecture_notes.md)
