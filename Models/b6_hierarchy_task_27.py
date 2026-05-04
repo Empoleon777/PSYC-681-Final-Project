@@ -10,7 +10,9 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pandas as pd
 from transformers import AutoModel, AutoTokenizer
+import os
 
 
 class B6HierarchyDraft(nn.Module):
@@ -243,6 +245,9 @@ def mean_abs_diff(a, b):
 def signed_diff(a, b):
     return (a - b).mean().item()
 
+def rel_diff(a, b):
+    return ((a - b).abs().mean() / (a.abs().mean() + 1e-6)).item()
+
 def run_evidence_ablation(model_cls, enc, tokenizer=None, print_tokens=True):
     """
     model_cls: class (e.g., B6HierarchyDraft)
@@ -388,8 +393,99 @@ def run_psych_ablation(model_cls, enc, tokenizer=None, print_tokens=True):
         "identity_signaling_std": id_probs.std().item(),
     }
 
-def rel_diff(a, b):
-    return ((a - b).abs().mean() / (a.abs().mean() + 1e-6)).item()
+def graph_evidence_ablation(model_cls, enc):
+    torch.manual_seed(42)
+    model = model_cls(weighted=True)
+    model.eval()
+
+    results = []
+
+    with torch.no_grad():
+        # baseline (scale = 0)
+        model.psych_scale.data.fill_(0.0)
+        y_base = model(**enc)
+
+        for s in torch.linspace(0, 1, steps=11):
+            model.psych_scale.data.fill_(s.item())
+            y = model(**enc)
+
+            entry = {
+                "scale": s.item(),
+                "z_diff": (y["z"] - y_base["z"]).abs().mean().item(),
+                "econ_diff": (y["econ_logits"] - y_base["econ_logits"]).abs().mean().item(),
+                "social_diff": (y["social_logits"] - y_base["social_logits"]).abs().mean().item(),
+                "intensity_diff": (y["intensity_logits"] - y_base["intensity_logits"]).abs().mean().item(),
+                "econ_signed": (y["econ_logits"] - y_base["econ_logits"]).mean().item(),
+                "social_signed": (y["social_logits"] - y_base["social_logits"]).mean().item(),
+                "intensity_signed": (y["intensity_logits"] - y_base["intensity_logits"]).mean().item(),
+                "econ_rel": rel_diff(y["econ_logits"], y_base["econ_logits"]),
+                "social_rel": rel_diff(y["social_logits"], y_base["social_logits"]),
+                "intensity_rel": rel_diff(y["intensity_logits"], y_base["intensity_logits"]),
+            }
+
+            results.append(entry)
+
+    df = pd.Dataframe(results)
+
+    os.makedirs('../Graphs', exist_ok=True)
+    f = df.plot(x="scale", y=["econ_diff", "social_diff", "intensity_diff"])
+    fig = f.get_figure()
+    fig.savefig("Evidence Ablation.jpeg")
+
+    f = df.plot(x="scale", y=["econ_signed", "social_signed", "intensity_signed"])
+    fig = f.get_figure()
+    fig.savefig("Evidence Ablation (Signed).jpeg")
+
+    f = df.plot(x="scale", y=["econ_rel", "social_rel", "intensity_rel"])
+    fig = f.get_figure()
+    fig.savefig("Evidence Ablation (Relative).jpeg")
+
+def graph_psych_ablation(model_cls, enc):
+    torch.manual_seed(42)
+    model = model_cls(psych=True)
+    model.eval()
+
+    results = []
+
+    with torch.no_grad():
+        # baseline (scale = 0)
+        model.psych_scale.data.fill_(0.0)
+        y_base = model(**enc)
+
+        for s in torch.linspace(0, 1, steps=11):
+            model.psych_scale.data.fill_(s.item())
+            y = model(**enc)
+
+            entry = {
+                "scale": s.item(),
+                "z_diff": (y["z"] - y_base["z"]).abs().mean().item(),
+                "econ_diff": (y["econ_logits"] - y_base["econ_logits"]).abs().mean().item(),
+                "social_diff": (y["social_logits"] - y_base["social_logits"]).abs().mean().item(),
+                "intensity_diff": (y["intensity_logits"] - y_base["intensity_logits"]).abs().mean().item(),
+                "econ_signed": (y["econ_logits"] - y_base["econ_logits"]).mean().item(),
+                "social_signed": (y["social_logits"] - y_base["social_logits"]).mean().item(),
+                "intensity_signed": (y["intensity_logits"] - y_base["intensity_logits"]).mean().item(),
+                "econ_rel": rel_diff(y["econ_logits"], y_base["econ_logits"]),
+                "social_rel": rel_diff(y["social_logits"], y_base["social_logits"]),
+                "intensity_rel": rel_diff(y["intensity_logits"], y_base["intensity_logits"]),
+            }
+
+            results.append(entry)
+
+    df = pd.Dataframe(results)
+
+    os.makedirs('../Graphs', exist_ok=True)
+    f = df.plot(x="scale", y=["econ_diff", "social_diff", "intensity_diff"])
+    fig = f.get_figure()
+    fig.savefig("Psychology Ablation.jpeg")
+
+    f = df.plot(x="scale", y=["econ_signed", "social_signed", "intensity_signed"])
+    fig = f.get_figure()
+    fig.savefig("Psychology Ablation (Signed).jpeg")
+
+    f = df.plot(x="scale", y=["econ_rel", "social_rel", "intensity_rel"])
+    fig = f.get_figure()
+    fig.savefig("Psychology Ablation (Relative).jpeg")
 
 if __name__ == "__main__":
     model = B6HierarchyDraft()
