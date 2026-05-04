@@ -425,20 +425,20 @@ def graph_evidence_ablation(model_cls, enc):
 
             results.append(entry)
 
-    df = pd.Dataframe(results)
+    df = pd.DataFrame(results)
 
     os.makedirs('../Graphs', exist_ok=True)
     f = df.plot(x="scale", y=["econ_diff", "social_diff", "intensity_diff"])
     fig = f.get_figure()
-    fig.savefig("Evidence Ablation.jpeg")
+    fig.savefig("../Graphs/Evidence Ablation.jpeg")
 
     f = df.plot(x="scale", y=["econ_signed", "social_signed", "intensity_signed"])
     fig = f.get_figure()
-    fig.savefig("Evidence Ablation (Signed).jpeg")
+    fig.savefig("../Graphs/Evidence Ablation (Signed).jpeg")
 
     f = df.plot(x="scale", y=["econ_rel", "social_rel", "intensity_rel"])
     fig = f.get_figure()
-    fig.savefig("Evidence Ablation (Relative).jpeg")
+    fig.savefig("../Graphs/Evidence Ablation (Relative).jpeg")
 
 def graph_psych_ablation(model_cls, enc):
     torch.manual_seed(42)
@@ -472,20 +472,20 @@ def graph_psych_ablation(model_cls, enc):
 
             results.append(entry)
 
-    df = pd.Dataframe(results)
+    df = pd.DataFrame(results)
 
     os.makedirs('../Graphs', exist_ok=True)
     f = df.plot(x="scale", y=["econ_diff", "social_diff", "intensity_diff"])
     fig = f.get_figure()
-    fig.savefig("Psychology Ablation.jpeg")
+    fig.savefig("../Graphs/Psychology Ablation.jpeg")
 
     f = df.plot(x="scale", y=["econ_signed", "social_signed", "intensity_signed"])
     fig = f.get_figure()
-    fig.savefig("Psychology Ablation (Signed).jpeg")
+    fig.savefig("../Graphs/Psychology Ablation (Signed).jpeg")
 
     f = df.plot(x="scale", y=["econ_rel", "social_rel", "intensity_rel"])
     fig = f.get_figure()
-    fig.savefig("Psychology Ablation (Relative).jpeg")
+    fig.savefig("../Graphs/Psychology Ablation (Relative).jpeg")
 
 if __name__ == "__main__":
     model = B6HierarchyDraft()
@@ -503,3 +503,5 @@ if __name__ == "__main__":
     enc = tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
     evidence_results = run_evidence_ablation(B6HierarchyDraft, enc, tokenizer)
     psych_results = run_psych_ablation(B6HierarchyDraft, enc, tokenizer)
+    graph_evidence_ablation(B6HierarchyDraft, enc)
+    graph_psych_ablation(B6HierarchyDraft, enc)
