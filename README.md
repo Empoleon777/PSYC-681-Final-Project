@@ -27,7 +27,7 @@ Quick links:
 If you want to run database writes:
 
 ```bash
-export DATABASE_URL=postgresql://localhost:5432/psyc681_ideology
+export DATABASE_URL=postgresql://USERNAME_GOES_HERE:PASSWORD_GOES_HERE@localhost:5432/psyc681_ideology
 python scripts/apply_schema.py
 python scripts/db_roundtrip_check.py
 ```
