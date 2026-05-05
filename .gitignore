@@ -6,6 +6,7 @@ __pycache__/
 outputs/
 Data/annotation/
 Data/annotation_60k/
+Data/counterfactuals
 Data/sources/
 Data/splits/
 
