@@ -27,7 +27,7 @@ Quick links:
 If you want to run database writes:
 
 ```bash
-export DATABASE_URL=postgresql://localhost:5432/psyc681_ideology
+export DATABASE_URL=postgresql://USERNAME_HERE:PASSWORD_HERE@localhost:5432/psyc681_ideology
 python scripts/apply_schema.py
 python scripts/db_roundtrip_check.py
 ```
@@ -125,7 +125,7 @@ Canonical label schema:
 ## B6 Draft
 
 Starter architecture file:
-- [b6_hierarchy_draft.py](PSYC-681-Final-Project/Models/b6_hierarchy_draft.py)
+- [b6_hierarchy.py](PSYC-681-Final-Project/Models/b6_hierarchy.py)
 
 Notes:
 - [b6_architecture_notes.md](PSYC-681-Final-Project/docs/b6_architecture_notes.md)

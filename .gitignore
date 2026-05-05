@@ -7,6 +7,11 @@ outputs/
 Data/annotation/
 Data/annotation_60k/
 Data/sources/
+Data/splits/
+
+# Other big files
+*.jsonl
+*.bz2
 
 # Local Postgres scratch data
 /tmp/psyc681_pgdata
