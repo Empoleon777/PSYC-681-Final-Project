@@ -88,7 +88,6 @@ def local_context_match(
 
 
 def score_identity_signal(post: Dict[str, str], flair_rules: Dict) -> RuleHit:
-    text = (post.get("text") or "").lower()
     flair = (post.get("flair") or "").lower()
 
     post_id = post["post_id"]
@@ -100,7 +99,7 @@ def score_identity_signal(post: Dict[str, str], flair_rules: Dict) -> RuleHit:
             return RuleHit(
                 post_id=post_id,
                 user_id=user_id,
-                rule_family="flair_or_self_decl",
+                rule_family="S1_flair",
                 fired=True,
                 econ_score=float(rule["zecon"]),
                 soc_score=float(rule["zsoc"]),
@@ -111,13 +110,33 @@ def score_identity_signal(post: Dict[str, str], flair_rules: Dict) -> RuleHit:
                 evidence=f"flair:{hit}",
             )
 
-    for rule in flair_rules["self_declaration_rules"]:
+    return RuleHit(
+        post_id=post_id,
+        user_id=user_id,
+        rule_family="S1_flair",
+        fired=False,
+        econ_score=0.0,
+        soc_score=0.0,
+        confidence=0.0,
+        context_fit=0.0,
+        target_guess="",
+        frame_guess="",
+        evidence="",
+    )
+
+
+def score_self_id_signal(post: Dict[str, str], self_id_rules: Dict) -> RuleHit:
+    text = (post.get("text") or "").lower()
+    post_id = post["post_id"]
+    user_id = post["user_id"]
+
+    for rule in self_id_rules.get("rules", []):
         hit = has_phrase(text, [p.lower() for p in rule["patterns"]])
         if hit:
             return RuleHit(
                 post_id=post_id,
                 user_id=user_id,
-                rule_family="flair_or_self_decl",
+                rule_family="S3_self_id_phrase",
                 fired=True,
                 econ_score=float(rule["zecon"]),
                 soc_score=float(rule["zsoc"]),
@@ -131,7 +150,7 @@ def score_identity_signal(post: Dict[str, str], flair_rules: Dict) -> RuleHit:
     return RuleHit(
         post_id=post_id,
         user_id=user_id,
-        rule_family="flair_or_self_decl",
+        rule_family="S3_self_id_phrase",
         fired=False,
         econ_score=0.0,
         soc_score=0.0,
@@ -197,7 +216,7 @@ def score_target_frame_signal(
         return RuleHit(
             post_id=post_id,
             user_id=user_id,
-            rule_family="target_frame_lexical",
+            rule_family="S4_target_frame_lexical",
             fired=True,
             econ_score=econ,
             soc_score=soc,
@@ -211,7 +230,7 @@ def score_target_frame_signal(
     return RuleHit(
         post_id=post_id,
         user_id=user_id,
-        rule_family="target_frame_lexical",
+        rule_family="S4_target_frame_lexical",
         fired=False,
         econ_score=0.0,
         soc_score=0.0,
@@ -243,8 +262,10 @@ def estimate_trust_weight(
     hit: RuleHit, peer_hits: List[RuleHit], historical: Dict[str, float]
 ) -> Tuple[float, Dict[str, float]]:
     prior = {
-        "flair_or_self_decl": 0.75,
-        "target_frame_lexical": 0.65,
+        "S1_flair": 0.82,
+        "S2_community_participation": 0.62,
+        "S3_self_id_phrase": 0.8,
+        "S4_target_frame_lexical": 0.7,
     }.get(hit.rule_family, 0.6)
 
     if not hit.fired:
@@ -326,6 +347,106 @@ def projection_offset(target_guess: str, frame_guess: str, stance_guess: str) ->
     )
 
 
+def build_user_activity(posts: List[Dict[str, str]]) -> Dict[str, Dict[str, int]]:
+    user_sub_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for post in posts:
+        uid = post.get("user_id", "")
+        sub = post.get("subreddit", "")
+        if not uid or not sub:
+            continue
+        user_sub_counts[uid][sub.lower()] += 1
+    return user_sub_counts
+
+
+def score_community_signal(
+    post: Dict[str, str],
+    user_sub_counts: Dict[str, Dict[str, int]],
+    community_axis_map: Dict,
+) -> RuleHit:
+    post_id = post["post_id"]
+    user_id = post["user_id"]
+    sub_counts = user_sub_counts.get(user_id, {})
+    total_posts = sum(sub_counts.values())
+
+    min_posts = int(community_axis_map.get("min_user_posts", 3))
+    if total_posts < min_posts:
+        return RuleHit(
+            post_id=post_id,
+            user_id=user_id,
+            rule_family="S2_community_participation",
+            fired=False,
+            econ_score=0.0,
+            soc_score=0.0,
+            confidence=0.0,
+            context_fit=0.0,
+            target_guess="",
+            frame_guess="",
+            evidence="",
+        )
+
+    mapped = community_axis_map.get("communities", {})
+    if not mapped:
+        return RuleHit(
+            post_id=post_id,
+            user_id=user_id,
+            rule_family="S2_community_participation",
+            fired=False,
+            econ_score=0.0,
+            soc_score=0.0,
+            confidence=0.0,
+            context_fit=0.0,
+            target_guess="",
+            frame_guess="",
+            evidence="",
+        )
+
+    mapped_norm = {k.lower(): v for k, v in mapped.items()}
+    econ_num = 0.0
+    soc_num = 0.0
+    matched_posts = 0
+    matched_communities: List[str] = []
+    for sub, count in sub_counts.items():
+        if sub not in mapped_norm:
+            continue
+        axes = mapped_norm[sub]
+        econ_num += float(axes.get("zecon", 0.0)) * count
+        soc_num += float(axes.get("zsoc", 0.0)) * count
+        matched_posts += count
+        matched_communities.append(sub)
+
+    if matched_posts == 0:
+        return RuleHit(
+            post_id=post_id,
+            user_id=user_id,
+            rule_family="S2_community_participation",
+            fired=False,
+            econ_score=0.0,
+            soc_score=0.0,
+            confidence=0.0,
+            context_fit=0.0,
+            target_guess="",
+            frame_guess="",
+            evidence="",
+        )
+
+    coverage = matched_posts / max(1, total_posts)
+    confidence = bound(0.45 + 0.5 * coverage, 0.45, 0.95)
+    context_fit = bound(0.55 + 0.35 * coverage, 0.55, 0.9)
+    return RuleHit(
+        post_id=post_id,
+        user_id=user_id,
+        rule_family="S2_community_participation",
+        fired=True,
+        econ_score=econ_num / matched_posts,
+        soc_score=soc_num / matched_posts,
+        confidence=confidence,
+        context_fit=context_fit,
+        target_guess="",
+        frame_guess="",
+        evidence=f"community_coverage:{coverage:.3f};communities:{','.join(sorted(set(matched_communities))[:6])}",
+    )
+
+
 def upsert_user_priors(rows: List[Dict[str, object]], dsn: str) -> None:
     if psycopg2 is None or Json is None or execute_values is None:
         raise SystemExit("psycopg2-binary is required for --write-db.")
@@ -372,6 +493,8 @@ def main() -> None:
     parser.add_argument("--flair-lexicon", type=Path, default=Path("pipeline/lexicons/flair_priors.json"))
     parser.add_argument("--target-lexicon", type=Path, default=Path("pipeline/lexicons/target_seeds.json"))
     parser.add_argument("--frame-lexicon", type=Path, default=Path("pipeline/lexicons/frame_seeds.json"))
+    parser.add_argument("--community-axis-map", type=Path, default=Path("pipeline/lexicons/community_axis_map.json"))
+    parser.add_argument("--self-id-rules", type=Path, default=Path("pipeline/lexicons/self_id_rules.json"))
     parser.add_argument("--historical-accuracy-json", type=Path, default=Path("outputs/weak_labels/source_accuracy.json"))
     parser.add_argument("--rule-audit-csv", type=Path, default=Path("outputs/weak_labels/rule_audit.csv"))
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/weak_labels"))
@@ -383,6 +506,9 @@ def main() -> None:
     flair_rules = load_json(args.flair_lexicon)
     target_rules = load_json(args.target_lexicon)
     frame_rules = load_json(args.frame_lexicon)
+    community_axis_map = load_json(args.community_axis_map)
+    self_id_rules = load_json(args.self_id_rules)
+    user_sub_counts = build_user_activity(posts)
 
     if args.rule_audit_csv.exists():
         historical = load_rule_audit(args.rule_audit_csv)
@@ -390,6 +516,13 @@ def main() -> None:
         historical = load_json(args.historical_accuracy_json)
     else:
         historical = {}
+    if not historical:
+        historical = {
+            "S1_flair": 0.82,
+            "S2_community_participation": 0.62,
+            "S3_self_id_phrase": 0.8,
+            "S4_target_frame_lexical": 0.7,
+        }
 
     blocked_counts: Dict[str, int] = defaultdict(int)
     hit_rows: List[Dict[str, object]] = []
@@ -398,8 +531,10 @@ def main() -> None:
 
     for post in posts:
         flair_hit = score_identity_signal(post, flair_rules)
+        community_hit = score_community_signal(post, user_sub_counts, community_axis_map)
+        self_id_hit = score_self_id_signal(post, self_id_rules)
         tf_hit = score_target_frame_signal(post, target_rules, frame_rules, blocked_counts)
-        hits = [flair_hit, tf_hit]
+        hits = [flair_hit, community_hit, self_id_hit, tf_hit]
 
         for hit in hits:
             trust, audit = estimate_trust_weight(hit, hits, historical)
@@ -436,10 +571,12 @@ def main() -> None:
 
         econ_ent = tri_state_entropy(econ)
         soc_ent = tri_state_entropy(soc)
-        q = bound(avg_trust * (1.0 - 0.5 * (econ_ent + soc_ent)), 0.0, 1.0)
+        avg_ent = 0.5 * (econ_ent + soc_ent)
+        activation_mass = mean(h.trust_weight * h.confidence for h in usable) if usable else 0.0
+        q = bound(activation_mass * (1.0 - 0.35 * avg_ent) + (0.05 if usable else 0.0), 0.0, 1.0)
 
         best_tf = max(
-            [h for h in usable if h.rule_family == "target_frame_lexical"],
+            [h for h in usable if h.rule_family == "S4_target_frame_lexical"],
             key=lambda h: h.confidence,
             default=None,
         )
@@ -458,7 +595,7 @@ def main() -> None:
                 "econ_entropy": round(econ_ent, 6),
                 "soc_entropy": round(soc_ent, 6),
                 "q_score": round(q, 6),
-                "low_quality": int(q < 0.35),
+                "low_quality": int(q < 0.2),
                 "target_hypothesis": target_guess,
                 "stance_hypothesis": stance_guess,
                 "frame_hypothesis": frame_guess,
@@ -467,10 +604,11 @@ def main() -> None:
             }
         )
 
-        if flair_hit.fired:
-            user_buckets[post["user_id"]].append(
-                (flair_hit.econ_score, flair_hit.soc_score, flair_hit.confidence)
-            )
+        for h in [flair_hit, community_hit, self_id_hit]:
+            if h.fired:
+                user_buckets[post["user_id"]].append(
+                    (h.econ_score, h.soc_score, h.confidence)
+                )
 
     user_prior_rows: List[Dict[str, object]] = []
     for user_id, vals in user_buckets.items():
@@ -480,7 +618,7 @@ def main() -> None:
                 "zecon": round(mean(v[0] for v in vals), 6),
                 "zsoc": round(mean(v[1] for v in vals), 6),
                 "confidence": round(mean(v[2] for v in vals), 6),
-                "method": "flair_or_self_decl",
+                "method": "multi_source_identity_and_community",
                 "details": json.dumps({"n_posts": len(vals)}, ensure_ascii=True),
             }
         )
@@ -495,6 +633,20 @@ def main() -> None:
     (args.output_dir / "false_positive_report.json").write_text(
         json.dumps(dict(blocked_counts), indent=2, ensure_ascii=True), encoding="utf-8"
     )
+    calibration_rows = [
+        {
+            "post_id": row["post_id"],
+            "source_name": row["source_name"],
+            "evidence": row["evidence"],
+            "context_score": row["context_score"],
+            "rs": row["rs"],
+            "is_correct": "",
+        }
+        for row in hit_rows
+        if int(row["fired"]) == 1
+    ]
+    calibration_rows.sort(key=lambda r: (r["source_name"], -float(r["rs"])))
+    write_csv(args.output_dir / "source_calibration_subset.csv", calibration_rows[:800])
 
     if args.write_db:
         if not args.database_url:

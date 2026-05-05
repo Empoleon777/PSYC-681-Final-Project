@@ -6,7 +6,7 @@ Annotators per post: `3`
 ## Ground Rules
 
 1. Label only what appears in the text.
-2. Use uncertain options when confidence is low.
+2. Use uncertain options when your confidence is low.
 3. Add evidence spans for ideology-relevant decisions.
 4. Avoid inferring author intent from profile assumptions.
 
@@ -38,7 +38,7 @@ Stratify by:
 Build packets with:
 - `python scripts/make_annotation_batch.py`
 - Default output is prefilled with weak-label suggestions for `q01..q12`.
-- Add `--blank-fields` to produce an empty template if needed.
+- Add `--blank-fields` if you want an empty template.
 
 ## Quality Checks
 

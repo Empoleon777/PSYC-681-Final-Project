@@ -165,6 +165,11 @@ def main() -> None:
         action="store_true",
         help="Fail if any annotation row has blank required question fields.",
     )
+    parser.add_argument(
+        "--require-three-annotators",
+        action="store_true",
+        help="Fail if any post has fewer or more than 3 annotators.",
+    )
     args = parser.parse_args()
 
     files = sorted(glob.glob(args.annotation_glob))
@@ -249,6 +254,12 @@ def main() -> None:
         if not args.database_url:
             raise SystemExit("DATABASE_URL is required when --write-db is set.")
         upsert_db(args.database_url, all_rows, aggregate_rows)
+
+    if args.require_three_annotators and incomplete > 0:
+        raise SystemExit(
+            "Found posts without exactly 3 annotators. "
+            "Task 14 requires 3 annotations per post."
+        )
 
     if args.require_complete_labels and rows_with_any_blank > 0:
         raise SystemExit(

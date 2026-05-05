@@ -1,0 +1,15 @@
+{
+  "min_user_posts": 3,
+  "communities": {
+    "Conservative": {"zecon": 0.65, "zsoc": 0.65},
+    "Republican": {"zecon": 0.6, "zsoc": 0.55},
+    "Libertarian": {"zecon": 0.8, "zsoc": -0.2},
+    "Liberal": {"zecon": -0.55, "zsoc": -0.55},
+    "Democrats": {"zecon": -0.45, "zsoc": -0.45},
+    "Socialism": {"zecon": -0.8, "zsoc": -0.25},
+    "PoliticalDiscussion": {"zecon": 0.0, "zsoc": 0.0},
+    "politics": {"zecon": 0.0, "zsoc": 0.0},
+    "neoliberal": {"zecon": 0.35, "zsoc": -0.15},
+    "PoliticalCompassMemes": {"zecon": 0.0, "zsoc": 0.0}
+  }
+}

@@ -1,165 +1,271 @@
+#!/usr/bin/env python3
+"""Task 16: B2 flat transformer baseline on gold hard labels."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import random
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Tuple
+
 import torch
 import torch.nn as nn
-import pandas as pd
-import numpy as np
-from datasets import load_dataset
-from transformers import AutoModel, AutoTokenizer, Trainer, TrainingArguments, TrainerCallback
 from sklearn.metrics import f1_score
-from sklearn.model_selection import train_test_split
+from torch.optim import AdamW
+from torch.utils.data import DataLoader, Dataset
+from transformers import AutoModel, AutoTokenizer, RobertaConfig, RobertaModel
 
-class Flat(nn.Module):
-    def __init__(self, model_name):
-        super().__init__()
-        self.roberta = AutoModel.from_pretrained(model_name)
-        hidden_size = self.roberta.config.hidden_size
-        self.relevance_head = nn.Linear(hidden_size, 2)
-        self.econ_head = nn.Linear(hidden_size, 3)
-        self.social_head = nn.Linear(hidden_size, 3)
-    
-    def forward(self, input_ids, attention_mask, **kwargs):
-        outputs = self.roberta(
-            input_ids=input_ids,
-            attention_mask=attention_mask
+
+TASKS = {
+    "relevance": ("q01_relevance", ["0", "1"]),
+    "economic_direction": ("q07_economic_direction", ["-1", "0", "1"]),
+    "social_direction": ("q08_social_direction", ["-1", "0", "1"]),
+}
+
+
+@dataclass
+class Row:
+    text: str
+    labels: Dict[str, int]
+
+
+class GoldDataset(Dataset):
+    def __init__(self, rows: List[Row], tokenizer, max_length: int) -> None:
+        self.rows = rows
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        row = self.rows[idx]
+        enc = self.tokenizer(
+            row.text,
+            truncation=True,
+            padding="max_length",
+            max_length=self.max_length,
+            return_tensors="pt",
         )
-        pooled = outputs.last_hidden_state[:, 0]
-
-        relevance_logits = self.relevance_head(pooled)
-        econ_logits = self.econ_head(pooled)
-        social_logits = self.social_head(pooled)
-
-        return {
-            "relevance_logits": relevance_logits,
-            "econ_logits": econ_logits,
-            "social_logits": social_logits
+        out = {
+            "input_ids": enc["input_ids"].squeeze(0),
+            "attention_mask": enc["attention_mask"].squeeze(0),
         }
-    
-class MultiTaskTrainer(Trainer):
-    def __init__(self, *args, pos_weight_relevance=None, pos_weight_econ=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.pos_weight_relevance = pos_weight_relevance
-        self.pos_weight_econ = pos_weight_econ
-    
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        relevance_labels = inputs.get("relevance_labels")
-        econ_labels = inputs.get("econ_labels")
-        social_labels = inputs.get("social_labels")
+        for task in TASKS:
+            out[f"label_{task}"] = torch.tensor(row.labels[task], dtype=torch.long)
+        return out
 
-        if relevance_labels is not None:
-            inputs.pop("relevance_labels")
-        if econ_labels is not None:
-            inputs.pop("econ_labels")
-        if social_labels is not None:
-            inputs.pop("social_labels")
 
-        outputs = model(**inputs)
+class SimpleHashTokenizer:
+    def __init__(self, vocab_size: int = 8192) -> None:
+        self.vocab_size = max(1024, int(vocab_size))
+        self.pad_id = 0
+        self.cls_id = 1
+        self.sep_id = 2
 
-        econ_labels = econ_labels.float()
+    def _token_to_id(self, token: str) -> int:
+        return 3 + (hash(token) % (self.vocab_size - 3))
 
-        ce = nn.CrossEntropyLoss(ignore_index=-1)
+    def __call__(
+        self,
+        text: str,
+        truncation: bool = True,
+        padding: str = "max_length",
+        max_length: int = 256,
+        return_tensors: str = "pt",
+    ) -> Dict[str, torch.Tensor]:
+        tokens = text.lower().split()
+        token_ids = [self._token_to_id(t) for t in tokens]
+        if truncation:
+            token_ids = token_ids[: max(0, max_length - 2)]
+        ids = [self.cls_id] + token_ids + [self.sep_id]
+        ids = ids[:max_length]
+        mask = [1] * len(ids)
+        if padding == "max_length" and len(ids) < max_length:
+            pad_n = max_length - len(ids)
+            ids.extend([self.pad_id] * pad_n)
+            mask.extend([0] * pad_n)
+        if return_tensors != "pt":
+            raise ValueError("SimpleHashTokenizer only supports return_tensors='pt'")
+        return {
+            "input_ids": torch.tensor([ids], dtype=torch.long),
+            "attention_mask": torch.tensor([mask], dtype=torch.long),
+        }
 
-        relevance_loss = ce(outputs["relevance_logits"], relevance_labels.long())
-        econ_loss = ce(outputs["econ_logits"], econ_labels.long())
-        social_loss = ce(outputs["social_logits"], social_labels.long())
 
-        loss = relevance_loss + econ_loss + social_loss
+class B2FlatModel(nn.Module):
+    def __init__(self, encoder_name: str = "roberta-base", offline_random_init: bool = False) -> None:
+        super().__init__()
+        if offline_random_init:
+            cfg = RobertaConfig(
+                vocab_size=30522,
+                hidden_size=256,
+                num_hidden_layers=4,
+                num_attention_heads=4,
+                intermediate_size=1024,
+                max_position_embeddings=514,
+            )
+            self.encoder = RobertaModel(cfg)
+        else:
+            self.encoder = AutoModel.from_pretrained(encoder_name)
+        hidden = self.encoder.config.hidden_size
+        self.relevance_head = nn.Linear(hidden, 2)
+        self.econ_head = nn.Linear(hidden, 3)
+        self.social_head = nn.Linear(hidden, 3)
 
-        return (loss, outputs) if return_outputs else loss
-    
-class VisualLoggerCallback(TrainerCallback):
-    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
-        if state.is_world_process_zero:
-            print(f"Metrics: \n{metrics}")
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> Dict[str, torch.Tensor]:
+        out = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        pooled = out.last_hidden_state[:, 0]
+        return {
+            "relevance": self.relevance_head(pooled),
+            "economic_direction": self.econ_head(pooled),
+            "social_direction": self.social_head(pooled),
+        }
 
-def tokenize(example):
-    return tokenizer(
-        example["text"],
-        truncation=True,
-        padding="max_length",
-        max_length=128
-    )
 
-def add_labels(example):
-    return {
-        "relevance_labels": example["q01_relevance"],
-        "econ_labels": example["q07_economic_direction"],
-        "social_labels": example["q08_social_direction"],
+def read_csv(path: Path) -> List[Dict[str, str]]:
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def load_gold_rows(raw_posts_csv: Path, gold_aggregates_csv: Path) -> List[Row]:
+    raw_rows = read_csv(raw_posts_csv)
+    gold_rows = read_csv(gold_aggregates_csv)
+    raw_by_post = {r["post_id"]: r for r in raw_rows}
+    rows: List[Row] = []
+    for g in gold_rows:
+        raw = raw_by_post.get(g["post_id"])
+        if raw is None:
+            continue
+        text = (raw.get("text") or "").strip()
+        if not text:
+            continue
+        majority = json.loads(g["majority_json"])
+        labels: Dict[str, int] = {}
+        valid = True
+        for task, (key, values) in TASKS.items():
+            val = str(majority.get(key, "")).strip()
+            if val not in values:
+                valid = False
+                break
+            labels[task] = values.index(val)
+        if valid:
+            rows.append(Row(text=text, labels=labels))
+    return rows
+
+
+def split_rows(rows: List[Row], seed: int) -> Tuple[List[Row], List[Row]]:
+    local = list(rows)
+    random.Random(seed).shuffle(local)
+    n_val = max(1, int(0.2 * len(local)))
+    return local[n_val:], local[:n_val]
+
+
+def macro_f1(y_true: List[int], y_pred: List[int]) -> float:
+    return float(f1_score(y_true, y_pred, average="macro", zero_division=0))
+
+
+def evaluate(model: B2FlatModel, loader: DataLoader, device: torch.device) -> Dict[str, float]:
+    model.eval()
+    y_true = {task: [] for task in TASKS}
+    y_pred = {task: [] for task in TASKS}
+    with torch.no_grad():
+        for batch in loader:
+            logits = model(
+                input_ids=batch["input_ids"].to(device),
+                attention_mask=batch["attention_mask"].to(device),
+            )
+            for task in TASKS:
+                preds = logits[task].argmax(dim=-1).cpu().tolist()
+                truth = batch[f"label_{task}"].tolist()
+                y_true[task].extend(truth)
+                y_pred[task].extend(preds)
+    out = {}
+    vals = []
+    for task in TASKS:
+        f1 = macro_f1(y_true[task], y_pred[task])
+        out[f"{task}_macro_f1"] = f1
+        vals.append(f1)
+    out["macro_f1_mean"] = float(sum(vals) / len(vals))
+    return out
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--raw-posts-csv", type=Path, default=Path("outputs/ingestion/raw_posts_60k.csv"))
+    parser.add_argument("--gold-aggregates-csv", type=Path, default=Path("outputs/annotation_60k/gold_aggregates.csv"))
+    parser.add_argument("--encoder-name", type=str, default="roberta-base")
+    parser.add_argument("--offline-random-init", action="store_true")
+    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--max-length", type=int, default=128)
+    parser.add_argument("--epochs", type=int, default=2)
+    parser.add_argument("--learning-rate", type=float, default=0.0)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--output-json", type=Path, default=Path("outputs/model_runs/b2_summary.json"))
+    args = parser.parse_args()
+
+    rows = load_gold_rows(args.raw_posts_csv, args.gold_aggregates_csv)
+    if len(rows) < 50:
+        raise SystemExit("Not enough rows for B2.")
+    train_rows, val_rows = split_rows(rows, args.seed)
+
+    if args.offline_random_init:
+        tokenizer = SimpleHashTokenizer()
+        model = B2FlatModel(encoder_name=args.encoder_name, offline_random_init=True)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(args.encoder_name)
+        model = B2FlatModel(encoder_name=args.encoder_name, offline_random_init=False)
+
+    train_ds = GoldDataset(train_rows, tokenizer, args.max_length)
+    val_ds = GoldDataset(val_rows, tokenizer, args.max_length)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
+
+    device = torch.device(args.device)
+    model = model.to(device)
+    if args.learning_rate > 0:
+        lr = args.learning_rate
+    else:
+        # Random-init offline mode needs a much larger LR than pretrained fine-tuning.
+        lr = 3e-4 if args.offline_random_init else 2e-5
+    opt = AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    loss_fn = nn.CrossEntropyLoss()
+
+    for epoch in range(1, args.epochs + 1):
+        model.train()
+        running = 0.0
+        steps = 0
+        for batch in train_loader:
+            opt.zero_grad()
+            logits = model(
+                input_ids=batch["input_ids"].to(device),
+                attention_mask=batch["attention_mask"].to(device),
+            )
+            loss = 0.0
+            for task in TASKS:
+                loss = loss + loss_fn(logits[task], batch[f"label_{task}"].to(device))
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step()
+            running += float(loss.detach().cpu())
+            steps += 1
+        metrics = evaluate(model, val_loader, device)
+        print(f"[epoch {epoch}] train_loss={running/max(1,steps):.4f} val_macro_f1={metrics['macro_f1_mean']:.4f}")
+        print(metrics)
+    payload = {
+        "variant": "b2",
+        "learning_rate": lr,
+        "train_rows": len(train_rows),
+        "val_rows": len(val_rows),
+        "metrics": metrics,
     }
+    args.output_json.parent.mkdir(parents=True, exist_ok=True)
+    args.output_json.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
 
-def compute_metrics(eval_pred):
-    logits, labels = eval_pred
 
-    relevance_logits, econ_logits, social_logits = logits
-
-    relevance_labels = labels[:, 0]
-    econ_labels = labels[:, 1]
-    social_labels = labels[:, 2]
-
-    econ_preds = np.argmax(econ_logits, axis=-1)
-    social_preds = np.argmax(social_logits, axis=-1)
-
-    return {
-        "econ_macro_f1": f1_score(econ_labels, econ_preds, average="macro", zero_division=0),
-        "social_macro_f1": f1_score(social_labels, social_preds, average="macro", zero_division=0),
-    }
-
-seed = 1234
-
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.backends.cudnn.deterministic = True
-
-model_name = "roberta-base"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-    
-dataset = load_dataset("csv", data_files=r"outputs/annotation_60k/gold_annotations.csv")
-dataset = dataset["train"]
-dataset = dataset.map(add_labels)
-dataset = dataset.map(tokenize)
-dataset = dataset.train_test_split(test_size=0.2, seed=42)
-train_data = dataset["train"]
-test_data = dataset["test"]
-train_valid = train_data.train_test_split(test_size=0.1)
-train_data = train_valid["train"]
-valid_data = train_valid["test"]
-
-train_data.set_format(
-    type="torch",
-    columns=[
-        "input_ids", "attention_mask",
-        "relevance_labels", "econ_labels", "social_labels"
-    ]
-)
-
-valid_data.set_format(
-    type="torch",
-    columns=[
-        "input_ids", "attention_mask",
-        "relevance_labels", "econ_labels", "social_labels"
-    ]
-)
-
-training_args = TrainingArguments(
-    output_dir="./roberta-mitweet",
-    eval_strategy="epoch",
-    learning_rate=2e-5,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
-    num_train_epochs=3,
-    weight_decay=0.01,
-    logging_dir="./logs",
-    remove_unused_columns=False
-)
-
-model = Flat(model_name)
-
-trainer = MultiTaskTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_data,
-    eval_dataset=valid_data,
-    compute_metrics=compute_metrics,
-    callbacks=[VisualLoggerCallback()]
-)
-
-trainer.train()
+if __name__ == "__main__":
+    main()

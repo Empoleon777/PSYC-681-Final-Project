@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+import math
 import random
 import re
 import sys
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -29,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from models.b6_ideology_model import B6HierarchyModel
+from models.b6_hierarchy import B6HierarchyModel
 
 
 TASK_SPECS = {
@@ -93,7 +96,7 @@ IGNORE_INDEX = -100
 
 
 class SimpleHashTokenizer:
-    """Offline fallback tokenizer for smoke tests and restricted environments."""
+    """Offline fallback tokenizer for quick local checks and restricted environments."""
 
     def __init__(self, vocab_size: int = 8192) -> None:
         self.vocab_size = max(1024, int(vocab_size))
@@ -149,11 +152,36 @@ def to_float(value: str, default: float = 0.0) -> float:
         return default
 
 
+def bound01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
 def seed_everything(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def parse_created_at(value: str) -> float:
+    raw = (value or "").strip()
+    if not raw:
+        return -1.0
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return float(dt.timestamp())
+    except ValueError:
+        return -1.0
+
+
+def stable_user_hash(user_id: str) -> int:
+    raw = (user_id or "").strip()
+    if not raw:
+        return -1
+    digest = hashlib.md5(raw.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16)
 
 
 def weak_relevance(low_quality: str, target: str, frame: str) -> str:
@@ -202,11 +230,16 @@ def encode_label(task: str, value: str) -> int:
 
 @dataclass
 class TrainingRecord:
+    post_id: str
+    subreddit: str
+    created_at: str
+    user_id: str
     text: str
     hard_labels: Dict[str, int]
     soft_labels: Dict[str, List[float]]
     soft_mask: Dict[str, int]
     disagreement_weight: float
+    quality_score: float
 
 
 class RepresentationDataset(Dataset):
@@ -239,6 +272,9 @@ class RepresentationDataset(Dataset):
             "input_ids": enc["input_ids"].squeeze(0),
             "attention_mask": enc["attention_mask"].squeeze(0),
             "disagreement_weight": torch.tensor(rec.disagreement_weight, dtype=torch.float32),
+            "quality_score": torch.tensor(rec.quality_score, dtype=torch.float32),
+            "user_hash": torch.tensor(stable_user_hash(rec.user_id), dtype=torch.long),
+            "created_ts": torch.tensor(parse_created_at(rec.created_at), dtype=torch.float32),
         }
         for task in self.tasks:
             item[f"hard_{task}"] = torch.tensor(rec.hard_labels[task], dtype=torch.long)
@@ -307,11 +343,16 @@ def build_weak_records(
 
         out.append(
             TrainingRecord(
+                post_id=raw.get("post_id", ""),
+                subreddit=raw.get("subreddit", ""),
+                created_at=raw.get("created_at", ""),
+                user_id=raw.get("user_id", ""),
                 text=text,
                 hard_labels=hard_labels,
                 soft_labels=soft_labels,
                 soft_mask=soft_mask,
                 disagreement_weight=1.0,
+                quality_score=bound01(q_score),
             )
         )
         if max_samples > 0 and len(out) >= max_samples:
@@ -392,11 +433,16 @@ def build_gold_records(
         disagreement = to_float(agg.get("disagreement_entropy", "0"), default=0.0)
         out.append(
             TrainingRecord(
+                post_id=post_id,
+                subreddit=raw.get("subreddit", ""),
+                created_at=raw.get("created_at", ""),
+                user_id=raw.get("user_id", ""),
                 text=text,
                 hard_labels=hard_labels,
                 soft_labels=soft_labels,
                 soft_mask=soft_mask,
                 disagreement_weight=1.0 + max(0.0, disagreement),
+                quality_score=1.0,
             )
         )
         if max_samples > 0 and len(out) >= max_samples:
@@ -458,6 +504,52 @@ def compute_task_loss(
     raise ValueError(f"Unknown loss mode: {mode}")
 
 
+def curriculum_weights(quality: torch.Tensor, progress: float, enabled: bool) -> torch.Tensor:
+    if not enabled:
+        return torch.ones_like(quality)
+    q = torch.clamp(quality, 0.0, 1.0)
+    early = 0.15 + 0.85 * q
+    late = torch.ones_like(q)
+    w = (1.0 - progress) * early + progress * late
+    return torch.clamp(w, 0.15, 1.0)
+
+
+def temporal_consistency_loss(
+    z: torch.Tensor,
+    user_hash: torch.Tensor,
+    created_ts: torch.Tensor,
+    time_scale_days: float,
+) -> Optional[torch.Tensor]:
+    valid = user_hash >= 0
+    if valid.sum().item() < 2:
+        return None
+
+    unique_users = torch.unique(user_hash[valid])
+    penalties: List[torch.Tensor] = []
+    denom_days = max(1e-6, float(time_scale_days))
+    for uid in unique_users.tolist():
+        idx = torch.nonzero(user_hash == uid, as_tuple=False).squeeze(-1)
+        if idx.numel() < 2:
+            continue
+        times = created_ts[idx]
+        if (times >= 0).any():
+            order = torch.argsort(times)
+        else:
+            order = torch.arange(idx.numel(), device=idx.device)
+        seq = idx[order]
+        for j in range(seq.numel() - 1):
+            a = seq[j]
+            b = seq[j + 1]
+            dt_seconds = torch.abs(created_ts[b] - created_ts[a]).item()
+            if dt_seconds < 0:
+                dt_seconds = 0.0
+            decay = math.exp(-(dt_seconds / 86400.0) / denom_days)
+            penalties.append(decay * ((z[a] - z[b]) ** 2).mean())
+    if not penalties:
+        return None
+    return torch.stack(penalties).mean()
+
+
 def train_one_epoch(
     model: B6HierarchyModel,
     loader: DataLoader,
@@ -467,10 +559,17 @@ def train_one_epoch(
     loss_mode: str,
     hybrid_alpha: float,
     ortho_weight: float,
+    consistency_weight: float,
+    consistency_time_scale_days: float,
+    curriculum_enabled: bool,
+    epoch_progress: float,
 ) -> Dict[str, float]:
     model.train()
     running_total = 0.0
     running_batches = 0
+    running_curriculum_weight = 0.0
+    running_consistency = 0.0
+    running_consistency_steps = 0
     task_sums = {t: 0.0 for t in tasks}
     task_counts = {t: 0 for t in tasks}
 
@@ -478,7 +577,11 @@ def train_one_epoch(
         optimizer.zero_grad()
         input_ids = batch["input_ids"].to(device)
         attention_mask = batch["attention_mask"].to(device)
+        quality = batch["quality_score"].to(device)
         sample_weight = batch["disagreement_weight"].to(device)
+        cweights = curriculum_weights(quality, epoch_progress, curriculum_enabled).to(device)
+        sample_weight = sample_weight * cweights
+        running_curriculum_weight += float(cweights.mean().detach().cpu())
 
         outputs = model(input_ids=input_ids, attention_mask=attention_mask)
         total_loss = None
@@ -510,6 +613,18 @@ def train_one_epoch(
         if ortho_weight > 0:
             total_loss = total_loss + ortho_weight * outputs["orthogonality_loss"]
 
+        if consistency_weight > 0:
+            cons = temporal_consistency_loss(
+                z=outputs["z"],
+                user_hash=batch["user_hash"].to(device),
+                created_ts=batch["created_ts"].to(device),
+                time_scale_days=consistency_time_scale_days,
+            )
+            if cons is not None:
+                total_loss = total_loss + consistency_weight * cons
+                running_consistency += float(cons.detach().cpu())
+                running_consistency_steps += 1
+
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
@@ -519,6 +634,8 @@ def train_one_epoch(
 
     out = {
         "total_loss": running_total / max(1, running_batches),
+        "avg_curriculum_weight": running_curriculum_weight / max(1, running_batches),
+        "avg_consistency_loss": running_consistency / max(1, running_consistency_steps),
     }
     for task in tasks:
         out[f"{task}_loss"] = task_sums[task] / max(1, task_counts[task])
@@ -610,6 +727,53 @@ def evaluate_ambiguity_heavy_subset(
     return out
 
 
+@torch.no_grad()
+def evaluate_ambiguity_heavy_soft_alignment(
+    model: B6HierarchyModel,
+    loader: DataLoader,
+    device: torch.device,
+) -> Dict[str, float]:
+    model.eval()
+    ambiguity_class_idx = TASK_SPECS["ambiguity"]["values"].index("2")
+    task_sums = {t: 0.0 for t in IDEOLOGY_TASKS}
+    task_counts = {t: 0 for t in IDEOLOGY_TASKS}
+    heavy_n = 0
+
+    for batch in loader:
+        outputs = model(
+            input_ids=batch["input_ids"].to(device),
+            attention_mask=batch["attention_mask"].to(device),
+        )
+        heavy_mask = (batch["hard_ambiguity"] == ambiguity_class_idx).to(device)
+        heavy_n += int(heavy_mask.sum().item())
+        if heavy_mask.sum().item() == 0:
+            continue
+
+        for task in IDEOLOGY_TASKS:
+            soft = batch[f"soft_{task}"].to(device)
+            soft_mask = batch[f"soft_mask_{task}"].to(device)
+            valid = heavy_mask & soft_mask
+            if valid.sum().item() == 0:
+                continue
+            logits = outputs[TASK_SPECS[task]["logits_key"]]
+            log_probs = F.log_softmax(logits, dim=-1)
+            per = F.kl_div(log_probs, soft, reduction="none").sum(dim=-1)
+            task_sums[task] += float(per[valid].sum().detach().cpu())
+            task_counts[task] += int(valid.sum().item())
+
+    out: Dict[str, float] = {"ambiguity_heavy_n": float(heavy_n)}
+    means: List[float] = []
+    for task in IDEOLOGY_TASKS:
+        if task_counts[task] == 0:
+            continue
+        mean_kl = task_sums[task] / task_counts[task]
+        out[f"{task}_soft_kl_ambiguity_heavy"] = float(mean_kl)
+        means.append(float(mean_kl))
+    if means:
+        out["soft_kl_mean_ambiguity_heavy"] = float(sum(means) / len(means))
+    return out
+
+
 def macro_f1(y_true: List[int], y_pred: List[int], num_classes: int) -> float:
     f1s: List[float] = []
     for c in range(num_classes):
@@ -626,6 +790,194 @@ def macro_f1(y_true: List[int], y_pred: List[int], num_classes: int) -> float:
         denom = (2 * tp + fp + fn)
         f1s.append((2 * tp) / denom if denom > 0 else 0.0)
     return sum(f1s) / max(1, len(f1s))
+
+
+@torch.no_grad()
+def collect_task_logits_and_labels(
+    model: B6HierarchyModel,
+    loader: DataLoader,
+    device: torch.device,
+    tasks: List[str],
+) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
+    model.eval()
+    per_task_logits: Dict[str, List[torch.Tensor]] = {t: [] for t in tasks}
+    per_task_labels: Dict[str, List[torch.Tensor]] = {t: [] for t in tasks}
+    for batch in loader:
+        outputs = model(
+            input_ids=batch["input_ids"].to(device),
+            attention_mask=batch["attention_mask"].to(device),
+        )
+        for task in tasks:
+            logits = outputs[TASK_SPECS[task]["logits_key"]].detach().cpu()
+            labels = batch[f"hard_{task}"].detach().cpu()
+            mask = labels != IGNORE_INDEX
+            if mask.sum().item() == 0:
+                continue
+            per_task_logits[task].append(logits[mask])
+            per_task_labels[task].append(labels[mask])
+    out: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
+    for task in tasks:
+        if not per_task_logits[task]:
+            continue
+        out[task] = (torch.cat(per_task_logits[task], dim=0), torch.cat(per_task_labels[task], dim=0))
+    return out
+
+
+def fit_temperature(logits: torch.Tensor, labels: torch.Tensor, max_iter: int = 50) -> float:
+    t = torch.tensor(1.0, requires_grad=True)
+    labels = labels.long()
+    optimizer = torch.optim.LBFGS([t], lr=0.2, max_iter=max_iter, line_search_fn="strong_wolfe")
+
+    def closure() -> torch.Tensor:
+        optimizer.zero_grad()
+        temp = torch.clamp(t, 0.05, 10.0)
+        loss = F.cross_entropy(logits / temp, labels)
+        loss.backward()
+        return loss
+
+    optimizer.step(closure)
+    return float(torch.clamp(t.detach(), 0.05, 10.0).item())
+
+
+def multiclass_probs(logits: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
+    temp = max(0.05, float(temperature))
+    return F.softmax(logits / temp, dim=-1)
+
+
+def ece_multiclass(probs: torch.Tensor, labels: torch.Tensor, n_bins: int = 15) -> float:
+    conf, pred = probs.max(dim=-1)
+    correct = (pred == labels).float()
+    bins = torch.linspace(0.0, 1.0, n_bins + 1)
+    ece = 0.0
+    n = probs.size(0)
+    for i in range(n_bins):
+        lo = bins[i]
+        hi = bins[i + 1]
+        in_bin = (conf > lo) & (conf <= hi) if i > 0 else (conf >= lo) & (conf <= hi)
+        bcount = int(in_bin.sum().item())
+        if bcount == 0:
+            continue
+        acc = correct[in_bin].mean().item()
+        c = conf[in_bin].mean().item()
+        ece += (bcount / max(1, n)) * abs(acc - c)
+    return float(ece)
+
+
+def brier_multiclass(probs: torch.Tensor, labels: torch.Tensor, n_classes: int) -> float:
+    one_hot = F.one_hot(labels.long(), num_classes=n_classes).float()
+    return float(((probs - one_hot) ** 2).sum(dim=-1).mean().item())
+
+
+def risk_coverage_curve(
+    probs: torch.Tensor,
+    labels: torch.Tensor,
+    coverages: List[float],
+) -> List[Dict[str, float]]:
+    conf, pred = probs.max(dim=-1)
+    correct = (pred == labels).float()
+    order = torch.argsort(conf, descending=True)
+    conf_sorted = conf[order]
+    corr_sorted = correct[order]
+    n = len(conf_sorted)
+    out: List[Dict[str, float]] = []
+    for c in coverages:
+        k = max(1, int(round(c * n)))
+        selected = corr_sorted[:k]
+        threshold = float(conf_sorted[k - 1].item())
+        accuracy = float(selected.mean().item())
+        out.append(
+            {
+                "coverage": float(c),
+                "threshold": threshold,
+                "risk": float(1.0 - accuracy),
+                "accuracy": accuracy,
+                "n_kept": float(k),
+            }
+        )
+    return out
+
+
+def run_calibration_and_abstention(
+    model: B6HierarchyModel,
+    loader: DataLoader,
+    device: torch.device,
+    tasks: List[str],
+) -> Dict[str, object]:
+    gathered = collect_task_logits_and_labels(model, loader, device, tasks)
+    summary: Dict[str, object] = {}
+    agg_n = 0
+    agg_ece_before = 0.0
+    agg_ece_after = 0.0
+    agg_brier_before = 0.0
+    agg_brier_after = 0.0
+    abstention_improves_any = False
+    for task in tasks:
+        if task not in gathered:
+            continue
+        logits, labels = gathered[task]
+        n_classes = len(TASK_SPECS[task]["values"])
+        t_opt = fit_temperature(logits, labels)
+
+        probs_before = multiclass_probs(logits, 1.0)
+        probs_after_candidate = multiclass_probs(logits, t_opt)
+        ece_before = ece_multiclass(probs_before, labels)
+        brier_before = brier_multiclass(probs_before, labels, n_classes=n_classes)
+        ece_candidate = ece_multiclass(probs_after_candidate, labels)
+        brier_candidate = brier_multiclass(probs_after_candidate, labels, n_classes=n_classes)
+
+        # Keep calibrated probs only if they improve a combined confidence quality score.
+        if (ece_candidate + brier_candidate) <= (ece_before + brier_before):
+            selected_temperature = t_opt
+            probs_after = probs_after_candidate
+            ece_after = ece_candidate
+            brier_after = brier_candidate
+        else:
+            selected_temperature = 1.0
+            probs_after = probs_before
+            ece_after = ece_before
+            brier_after = brier_before
+
+        curve = risk_coverage_curve(
+            probs_after,
+            labels,
+            coverages=[1.0, 0.95, 0.9, 0.8, 0.7, 0.6, 0.5],
+        )
+        full_risk = curve[0]["risk"] if curve else 1.0
+        abstention_reduces_error = any(
+            (row["coverage"] < 1.0) and (row["risk"] < full_risk) for row in curve
+        )
+        abstention_improves_any = abstention_improves_any or abstention_reduces_error
+        n_eval = int(labels.numel())
+        agg_n += n_eval
+        agg_ece_before += n_eval * ece_before
+        agg_ece_after += n_eval * ece_after
+        agg_brier_before += n_eval * brier_before
+        agg_brier_after += n_eval * brier_after
+        summary[task] = {
+            "n_eval": n_eval,
+            "temperature": selected_temperature,
+            "temperature_candidate": t_opt,
+            "ece_before": ece_before,
+            "ece_after": ece_after,
+            "brier_before": brier_before,
+            "brier_after": brier_after,
+            "abstention_reduces_error": abstention_reduces_error,
+            "risk_coverage": curve,
+        }
+    if agg_n > 0:
+        agg_entry = {
+            "n_eval_total": agg_n,
+            "ece_before_weighted": agg_ece_before / agg_n,
+            "ece_after_weighted": agg_ece_after / agg_n,
+            "brier_before_weighted": agg_brier_before / agg_n,
+            "brier_after_weighted": agg_brier_after / agg_n,
+            "confidence_quality_improved": (agg_ece_after + agg_brier_after) < (agg_ece_before + agg_brier_before),
+            "abstention_reduces_error_any_task": abstention_improves_any,
+            "checkpoint_h_satisfied": ((agg_ece_after + agg_brier_after) < (agg_ece_before + agg_brier_before))
+            and abstention_improves_any,
+        }
+        summary["_aggregate"] = agg_entry
+    return summary
 
 
 def save_checkpoint(path: Path, model: B6HierarchyModel, metadata: Dict) -> None:
@@ -665,6 +1017,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--ortho-weight", type=float, default=0.05)
     parser.add_argument("--val-fraction", type=float, default=0.1)
+    parser.add_argument(
+        "--consistency-weight",
+        type=float,
+        default=0.0,
+        help="Task 23: weight for user-level temporal consistency loss during weak pretraining.",
+    )
+    parser.add_argument(
+        "--consistency-time-scale-days",
+        type=float,
+        default=30.0,
+        help="Task 23: temporal decay scale for consistency regularization.",
+    )
+    parser.add_argument(
+        "--enable-curriculum",
+        action="store_true",
+        help="Task 24: confidence-based curriculum (high-q examples weighted more in early epochs).",
+    )
+    parser.add_argument(
+        "--skip-calibration",
+        action="store_true",
+        help="Skip Task 25 calibration/abstention analysis.",
+    )
 
     parser.add_argument("--gold-loss-mode", choices=["hard", "soft", "hybrid"], default="hybrid")
     parser.add_argument("--hybrid-alpha", type=float, default=0.5)
@@ -741,11 +1115,15 @@ def main() -> None:
     metadata["stage1"]["records_total"] = len(weak_records)
     metadata["stage1"]["records_train"] = len(weak_train)
     metadata["stage1"]["records_val"] = len(weak_val)
+    metadata["stage1"]["curriculum_enabled"] = args.enable_curriculum
+    metadata["stage1"]["consistency_weight"] = args.consistency_weight
+    metadata["stage1"]["consistency_time_scale_days"] = args.consistency_time_scale_days
     metadata["stage1"]["epochs"] = []
 
     if args.weak_epochs > 0:
         optimizer = AdamW(model.parameters(), lr=args.weak_lr, weight_decay=args.weight_decay)
         for epoch in range(1, args.weak_epochs + 1):
+            weak_progress = (epoch - 1) / max(1, args.weak_epochs - 1)
             train_stats = train_one_epoch(
                 model=model,
                 loader=weak_train_loader,
@@ -755,6 +1133,10 @@ def main() -> None:
                 loss_mode="hard",
                 hybrid_alpha=args.hybrid_alpha,
                 ortho_weight=args.ortho_weight,
+                consistency_weight=args.consistency_weight,
+                consistency_time_scale_days=args.consistency_time_scale_days,
+                curriculum_enabled=args.enable_curriculum,
+                epoch_progress=weak_progress,
             )
             epoch_result = {"epoch": epoch, "train": train_stats}
             if weak_val_loader is not None:
@@ -803,6 +1185,7 @@ def main() -> None:
     if args.gold_epochs > 0:
         optimizer = AdamW(model.parameters(), lr=args.gold_lr, weight_decay=args.weight_decay)
         for epoch in range(1, args.gold_epochs + 1):
+            gold_progress = (epoch - 1) / max(1, args.gold_epochs - 1)
             train_stats = train_one_epoch(
                 model=model,
                 loader=gold_train_loader,
@@ -812,6 +1195,10 @@ def main() -> None:
                 loss_mode=args.gold_loss_mode,
                 hybrid_alpha=args.hybrid_alpha,
                 ortho_weight=args.ortho_weight,
+                consistency_weight=0.0,
+                consistency_time_scale_days=args.consistency_time_scale_days,
+                curriculum_enabled=False,
+                epoch_progress=gold_progress,
             )
             epoch_result = {"epoch": epoch, "train": train_stats}
             if gold_val_loader is not None:
@@ -821,10 +1208,29 @@ def main() -> None:
                     gold_val_loader,
                     device,
                 )
+                epoch_result["ambiguity_heavy_soft_alignment_val"] = evaluate_ambiguity_heavy_soft_alignment(
+                    model,
+                    gold_val_loader,
+                    device,
+                )
             metadata["stage2"]["epochs"].append(epoch_result)
             print(f"[stage2][epoch {epoch}] train_loss={train_stats['total_loss']:.4f}")
     else:
         print("[stage2] skipped (gold-epochs=0)")
+
+    if (not args.skip_calibration) and gold_val_loader is not None:
+        calibration_summary = run_calibration_and_abstention(
+            model=model,
+            loader=gold_val_loader,
+            device=device,
+            tasks=IDEOLOGY_TASKS,
+        )
+        metadata["stage2"]["calibration"] = calibration_summary
+        (args.output_dir / "calibration_summary.json").write_text(
+            json.dumps(calibration_summary, indent=2, ensure_ascii=True),
+            encoding="utf-8",
+        )
+        print("[stage2] wrote calibration_summary.json")
 
     save_checkpoint(args.output_dir / "stage2_gold_finetuned.pt", model, metadata)
     (args.output_dir / "training_summary.json").write_text(

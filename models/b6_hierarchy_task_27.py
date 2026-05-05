@@ -1,146 +1,119 @@
-"""Draft B6 hierarchy model.
-
-This is a working architecture draft, not a finished training implementation.
-"""
+#!/usr/bin/env python3
+"""Tasks 27/28 extension heads for B6: evidence + psychology."""
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+import argparse
+import csv
+import json
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pandas as pd
-from transformers import AutoModel, AutoTokenizer
-import os
+from transformers import AutoTokenizer
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from models.b6_hierarchy import B6HierarchyModel
 
 
-class B6HierarchyDraft(nn.Module):
+def token_prf1(logits: torch.Tensor, labels: torch.Tensor, mask: torch.Tensor, threshold: float = 0.5) -> Dict[str, float]:
+    probs = torch.sigmoid(logits)
+    preds = probs >= threshold
+    valid = mask.bool()
+    tp = ((preds == 1) & (labels == 1) & valid).sum().item()
+    fp = ((preds == 1) & (labels == 0) & valid).sum().item()
+    fn = ((preds == 0) & (labels == 1) & valid).sum().item()
+    precision = tp / max(1, tp + fp)
+    recall = tp / max(1, tp + fn)
+    f1 = 2 * precision * recall / max(1e-8, precision + recall)
+    return {"precision": precision, "recall": recall, "f1": f1}
+
+
+class SimpleHashTokenizer:
+    def __init__(self, vocab_size: int = 8192) -> None:
+        self.vocab_size = max(1024, int(vocab_size))
+        self.pad_id = 0
+        self.cls_id = 1
+        self.sep_id = 2
+
+    def _token_to_id(self, token: str) -> int:
+        return 3 + (hash(token) % (self.vocab_size - 3))
+
+    def __call__(
+        self,
+        texts: List[str],
+        return_tensors: str = "pt",
+        padding: bool = True,
+        truncation: bool = True,
+        max_length: int = 64,
+    ) -> Dict[str, torch.Tensor]:
+        rows_ids: List[List[int]] = []
+        rows_mask: List[List[int]] = []
+        for text in texts:
+            token_ids = [self._token_to_id(tok) for tok in text.lower().split()]
+            if truncation:
+                token_ids = token_ids[: max(0, max_length - 2)]
+            ids = [self.cls_id] + token_ids + [self.sep_id]
+            ids = ids[:max_length]
+            mask = [1] * len(ids)
+            if padding and len(ids) < max_length:
+                pad_n = max_length - len(ids)
+                ids.extend([self.pad_id] * pad_n)
+                mask.extend([0] * pad_n)
+            rows_ids.append(ids)
+            rows_mask.append(mask)
+        if return_tensors != "pt":
+            raise ValueError("SimpleHashTokenizer only supports return_tensors='pt'")
+        return {
+            "input_ids": torch.tensor(rows_ids, dtype=torch.long),
+            "attention_mask": torch.tensor(rows_mask, dtype=torch.long),
+        }
+
+
+class B6EvidencePsychModel(B6HierarchyModel):
     def __init__(
         self,
-        weighted = False,
-        psych = False,
         encoder_name: str = "roberta-base",
+        load_pretrained: bool = True,
+        vocab_size: int = 30522,
         num_targets: int = 7,
         num_stances: int = 3,
         num_frames: int = 9,
         latent_dim: int = 128,
+        enable_evidence: bool = True,
+        enable_psych: bool = True,
     ) -> None:
-        super().__init__()
-        self.weighted = weighted
-        self.psych = psych        
-        self.psych_scale = nn.Parameter(torch.tensor(1.0))
-        self.evidence_scale = nn.Parameter(torch.tensor(1.0))
-        self.encoder = AutoModel.from_pretrained(encoder_name)
+        super().__init__(
+            encoder_name=encoder_name,
+            load_pretrained=load_pretrained,
+            vocab_size=vocab_size,
+            num_targets=num_targets,
+            num_stances=num_stances,
+            num_frames=num_frames,
+            latent_dim=latent_dim,
+        )
+        self.enable_evidence = enable_evidence
+        self.enable_psych = enable_psych
         hidden = self.encoder.config.hidden_size
 
-        # Discourse-level heads.
-        self.relevance_head = nn.Linear(hidden, 2)
-        self.target_head = nn.Linear(hidden, num_targets)
-        self.stance_head = nn.Linear(hidden, num_stances)
-        self.frame_head = nn.Linear(hidden, num_frames)
-
-        # Evidence head
         self.evidence_head = nn.Linear(hidden, 1)
-
-        # Psychological cue heads
         self.moralization_head = nn.Linear(hidden, 3)
         self.identity_signaling_head = nn.Linear(hidden, 3)
-
-        # Intermediate representations used by the ideology projection layer.
-        self.target_repr = nn.Linear(num_targets, latent_dim)
-        self.stance_repr = nn.Linear(num_stances, latent_dim)
-        self.frame_repr = nn.Linear(num_frames, latent_dim)
-
         self.moralization_repr = nn.Linear(3, latent_dim)
         self.identity_signaling_repr = nn.Linear(3, latent_dim)
+        self.psych_scale = nn.Parameter(torch.tensor(1.0))
+        self.evidence_scale = nn.Parameter(torch.tensor(1.0))
 
-        base_dim = (2 * hidden if self.weighted else hidden) + 3 * latent_dim
-        input_dim = base_dim + (2 * latent_dim if self.psych else 0)
-        # Projection into latent ideology vector z(x).
-        self.ideology_projection = nn.Sequential(
-            nn.Linear(input_dim, latent_dim),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(latent_dim, latent_dim),
-            nn.GELU(),
-        )
-
-        # Ideology-level heads.
-        self.econ_head = nn.Linear(latent_dim, 3)
-        self.social_head = nn.Linear(latent_dim, 3)
-        self.intensity_head = nn.Linear(latent_dim, 3)
-        self.ambiguity_head = nn.Linear(latent_dim, 1)
-
-    def orthogonality_regularization(self) -> torch.Tensor:
-        """Encourage decorrelated Level B head directions."""
-        weights = torch.stack(
-            [
-                F.normalize(self.econ_head.weight.mean(dim=0), dim=0),
-                F.normalize(self.social_head.weight.mean(dim=0), dim=0),
-                F.normalize(self.intensity_head.weight.mean(dim=0), dim=0),
-                F.normalize(self.ambiguity_head.weight.mean(dim=0), dim=0),
-            ],
-            dim=0,
-        )
-        gram = weights @ weights.T
-        identity = torch.eye(gram.size(0), device=gram.device)
-        return ((gram - identity) ** 2).mean()
-    
-    def compute_loss(self, outputs, labels):
-        loss_dict = {}
-
-        def kl_loss(logits, target_probs):
-            log_probs = F.log_softmax(logits, dim=-1)
-            return F.kl_div(log_probs, target_probs, reduction="batchmean")
-
-        loss_econ = kl_loss(outputs["econ_logits"], labels["econ_dist"])
-        loss_social = kl_loss(outputs["social_logits"], labels["social_dist"])
-        loss_intensity = kl_loss(outputs["intensity_logits"], labels["intensity_dist"])
-        
-        if self.psych: 
-            loss_moralization = kl_loss(outputs["moralization_logits"], labels["moralization_dist"])
-            loss_identity_signaling = kl_loss(outputs["identity_signaling_logits"], labels["identity_signaling_dist"])
-        else:
-            loss_moralization = 0
-            loss_identity_signaling = 0
-
-        p = labels["econ_dist"]
-        entropy = -(p * torch.log(p + 1e-8)).sum(dim=-1)
-
-        bins = torch.bucketize(entropy, torch.tensor([0.5, 1.0], device=entropy.device))
-        ambiguity_target = F.one_hot(bins, num_classes=3).float()
-
-        loss_amb = kl_loss(outputs["ambiguity_logits"], ambiguity_target)
-
-        loss_evidence = F.binary_cross_entropy_with_logits(
-            outputs["evidence_logits"],
-            labels["evidence_labels"].unsqueeze(-1)
-        )
-
-        total_loss = (
-            loss_econ
-            + loss_social
-            + loss_intensity
-            + 0.5 * loss_amb
-            + 0.1 * outputs["orthogonality_loss"]
-            + 0.5 * loss_evidence
-        )
-
-        if self.psych:
-            total_loss += 0.5 * (loss_moralization + loss_identity_signaling)
-
-        loss_dict.update({
-            "loss": total_loss,
-            "econ": loss_econ,
-            "social": loss_social,
-            "intensity": loss_intensity,
-            "ambiguity": loss_amb,
-            "moralization": loss_moralization,
-            "identity_signaling": loss_identity_signaling
-        })
-
-        return loss_dict
+        in_features = self.ideology_projection[0].in_features
+        extra = (hidden if enable_evidence else 0) + (2 * latent_dim if enable_psych else 0)
+        self.ideology_projection[0] = nn.Linear(in_features + extra, latent_dim)
 
     def forward(
         self,
@@ -149,357 +122,160 @@ class B6HierarchyDraft(nn.Module):
         return_intermediates: bool = True,
         labels: Optional[Dict[str, torch.Tensor]] = None,
     ) -> Dict[str, torch.Tensor]:
-        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled = outputs.last_hidden_state[:, 0]
+        base = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        pooled = base.last_hidden_state[:, 0]
+        token_emb = base.last_hidden_state
 
-        token_embeddings = outputs.last_hidden_state
-        evidence_logits = self.evidence_head(token_embeddings)
-        evidence_probs = torch.sigmoid(evidence_logits)
-        mask = attention_mask.unsqueeze(-1).float()
-        evidence_probs = evidence_probs * mask
-        weighted_sum = (evidence_probs * token_embeddings).sum(dim=1)
-        norm = evidence_probs.sum(dim=1).clamp(min=1e-6)
-        evidence_repr = self.evidence_scale * weighted_sum/norm
-
-        if self.weighted:
-            encoder_features = torch.cat([pooled, evidence_repr], dim=-1)
-        else:
-            encoder_features = pooled
-
-        # Discourse-level predictions.
         relevance_logits = self.relevance_head(pooled)
         target_logits = self.target_head(pooled)
         stance_logits = self.stance_head(pooled)
         frame_logits = self.frame_head(pooled)
 
-        # Convert discourse logits into intermediate representations.
-        target_probs = F.softmax(target_logits, dim=-1)
-        stance_probs = F.softmax(stance_logits, dim=-1)
-        frame_probs = F.softmax(frame_logits, dim=-1)
+        target_h = self.target_repr(F.softmax(target_logits, dim=-1))
+        stance_h = self.stance_repr(F.softmax(stance_logits, dim=-1))
+        frame_h = self.frame_repr(F.softmax(frame_logits, dim=-1))
 
-        target_h = self.target_repr(target_probs)
-        stance_h = self.stance_repr(stance_probs)
-        frame_h = self.frame_repr(frame_probs)
+        z_parts = [pooled, target_h, stance_h, frame_h]
+        out: Dict[str, torch.Tensor] = {}
 
-        # Project pooled encoder state and discourse representations into z.
-        if self.psych:            
+        if self.enable_evidence:
+            evidence_logits = self.evidence_head(token_emb).squeeze(-1)
+            ev_mask = attention_mask.float()
+            ev_probs = torch.sigmoid(evidence_logits) * ev_mask
+            weighted = torch.bmm(ev_probs.unsqueeze(1), token_emb).squeeze(1)
+            norm = ev_probs.sum(dim=1, keepdim=True).clamp(min=1e-6)
+            evidence_repr = self.evidence_scale * (weighted / norm)
+            z_parts.append(evidence_repr)
+            out["evidence_logits"] = evidence_logits
+            out["evidence_probs"] = ev_probs
+            out["evidence_repr"] = evidence_repr
+
+        if self.enable_psych:
             moralization_logits = self.moralization_head(pooled)
-            identity_signaling_logits = self.identity_signaling_head(pooled)
+            identity_logits = self.identity_signaling_head(pooled)
             moralization_probs = F.softmax(moralization_logits, dim=-1)
-            identity_signaling_probs = F.softmax(identity_signaling_logits, dim=-1)
-            moralization_h = self.moralization_repr(moralization_probs)
-            identity_signaling_h = self.identity_signaling_repr(identity_signaling_probs)
-            p = torch.cat([moralization_h, identity_signaling_h], dim=-1)
-            p = self.psych_scale * p
-            z_input = torch.cat([encoder_features, target_h, stance_h, frame_h, p], dim=-1)
-        else:
-            z_input = torch.cat([encoder_features, target_h, stance_h, frame_h], dim=-1)
-        
-        z = self.ideology_projection(z_input)
+            identity_probs = F.softmax(identity_logits, dim=-1)
+            psych_repr = torch.cat(
+                [
+                    self.moralization_repr(moralization_probs),
+                    self.identity_signaling_repr(identity_probs),
+                ],
+                dim=-1,
+            )
+            psych_repr = self.psych_scale * psych_repr
+            z_parts.append(psych_repr)
+            out["moralization_logits"] = moralization_logits
+            out["identity_signaling_logits"] = identity_logits
+            out["moralization_probs"] = moralization_probs
+            out["identity_signaling_probs"] = identity_probs
 
-        # Ideology predictions from z.
+        z_input = torch.cat(z_parts, dim=-1)
+        z = self.ideology_projection(z_input)
         econ_logits = self.econ_head(z)
         social_logits = self.social_head(z)
         intensity_logits = self.intensity_head(z)
         ambiguity_logits = self.ambiguity_head(z)
 
-        out = {
-            "relevance_logits": relevance_logits,
-            "target_logits": target_logits,
-            "stance_logits": stance_logits,
-            "frame_logits": frame_logits,
-            "econ_logits": econ_logits,
-            "social_logits": social_logits,
-            "intensity_logits": intensity_logits,
-            "ambiguity_logits": ambiguity_logits,
-            "z": z,
-            "orthogonality_loss": self.orthogonality_regularization(),
-            "evidence_logits": evidence_logits,
-            "evidence_probs": evidence_probs,
-            "evidence_repr": evidence_repr,
-        }
-
-        if self.psych:
-            out.update({
-                "moralization_logits": moralization_logits,
-                "identity_signaling_logits": identity_signaling_logits,
-                "moralization_probs": moralization_probs,
-                "identity_signaling_probs": identity_signaling_probs,
-                "p": p
-            })
-
+        out.update(
+            {
+                "relevance_logits": relevance_logits,
+                "target_logits": target_logits,
+                "stance_logits": stance_logits,
+                "frame_logits": frame_logits,
+                "econ_logits": econ_logits,
+                "social_logits": social_logits,
+                "intensity_logits": intensity_logits,
+                "ambiguity_logits": ambiguity_logits,
+                "z": z,
+                "orthogonality_loss": self.orthogonality_regularization(),
+            }
+        )
         if return_intermediates:
             out["target_h"] = target_h
             out["stance_h"] = stance_h
             out["frame_h"] = frame_h
-
         if labels is not None:
-            loss_dict = self.compute_loss(out, labels)
-            out.update(loss_dict)
-
+            out.update(self.compute_loss(out, labels))
+            if self.enable_evidence and "evidence_labels" in labels:
+                ev_labels = labels["evidence_labels"].float()
+                ev_mask = labels["evidence_mask"].float()
+                bce = F.binary_cross_entropy_with_logits(out["evidence_logits"], ev_labels, reduction="none")
+                out["evidence_bce_loss"] = (bce * ev_mask).sum() / ev_mask.sum().clamp(min=1.0)
+                out["loss"] = out["loss"] + 0.5 * out["evidence_bce_loss"]
+            if self.enable_psych and "moralization_dist" in labels and "identity_signaling_dist" in labels:
+                m_loss = F.kl_div(F.log_softmax(out["moralization_logits"], dim=-1), labels["moralization_dist"], reduction="batchmean")
+                i_loss = F.kl_div(F.log_softmax(out["identity_signaling_logits"], dim=-1), labels["identity_signaling_dist"], reduction="batchmean")
+                out["psych_loss"] = m_loss + i_loss
+                out["loss"] = out["loss"] + 0.5 * out["psych_loss"]
         return out
 
-def mean_abs_diff(a, b):
-    return (a - b).abs().mean().item()
-    
-def signed_diff(a, b):
-    return (a - b).mean().item()
 
-def rel_diff(a, b):
-    return ((a - b).abs().mean() / (a.abs().mean() + 1e-6)).item()
+def read_csv(path: Path) -> List[Dict[str, str]]:
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
 
-def run_evidence_ablation(model_cls, enc, tokenizer=None, print_tokens=True):
-    """
-    model_cls: class (e.g., B6HierarchyDraft)
-    enc: tokenizer output dict (input_ids, attention_mask)
-    tokenizer: optional, for qualitative token print
-    """
 
-    torch.manual_seed(42)
-    model_no = model_cls(weighted=False)
-    torch.manual_seed(42)
-    model_yes = model_cls(weighted=True)
+def check_gold_psych_labels(gold_annotations_csv: Path) -> Dict[str, int]:
+    rows = read_csv(gold_annotations_csv)
+    moral = sum(1 for r in rows if (r.get("q05_moralization") or "").strip() != "")
+    identity = sum(1 for r in rows if (r.get("q06_identity_signaling") or "").strip() != "")
+    return {"rows_total": len(rows), "rows_with_moralization": moral, "rows_with_identity_signaling": identity}
 
-    model_no.evidence_scale.data.fill_(0.0)
-    model_yes.evidence_scale.data.fill_(1.0)
 
-    model_no.eval()
-    model_yes.eval()
-
-    with torch.no_grad():
-        y_no = model_no(**enc)
-        y_yes = model_yes(**enc)
-
-    print("\n=== Evidence Ablation ===")
-
-    print("\n[Representation]")
-    print("z diff:", mean_abs_diff(y_yes["z"], y_no["z"]))
-
-    print("\n[Ideology logits]")
-    print(f"Economic Difference: {mean_abs_diff(y_yes['econ_logits'], y_no['econ_logits'])}")
-    print(f"Social Difference: {mean_abs_diff(y_yes['social_logits'], y_no['social_logits'])}")
-    print(f"Intensity Difference: {mean_abs_diff(y_yes['intensity_logits'], y_no['intensity_logits'])}")
-
-    print(f"Economic Relative Difference: {rel_diff(y_yes['econ_logits'], y_no['econ_logits'])}")
-    print(f"Social Relative Difference: {rel_diff(y_yes['social_logits'], y_no['social_logits'])}")
-    print(f"Intensity Relative Difference: {rel_diff(y_yes['intensity_logits'], y_no['intensity_logits'])}")
-
-    print(f"Economic Signed Shift: {signed_diff(y_yes['econ_logits'], y_no['econ_logits'])}")
-    print(f"Social Signed Shift: {signed_diff(y_yes['social_logits'], y_no['social_logits'])}")
-    print(f"Intensity Signed Shift: {signed_diff(y_yes['intensity_logits'], y_no['intensity_logits'])}")
-
-    probs = y_yes["evidence_probs"]
-    print("\n[Evidence stats]")
-    print("mean:", probs.mean().item())
-    print("std :", probs.std().item())
-    print("sum per example:", probs.sum(dim=1).squeeze(-1))
-
-    if tokenizer is not None and print_tokens:
-        print("\n[Token-level evidence (example 0)]")
-        tokens = tokenizer.convert_ids_to_tokens(enc["input_ids"][0])
-        scores = probs[0].squeeze(-1).cpu().numpy()
-
-        for t, s in zip(tokens, scores):
-            t_clean = t.replace("Ġ", "")
-            print(f"{t_clean:15} {s:.3f}")
-
-    return {
-        "z_diff": mean_abs_diff(y_yes["z"], y_no["z"]),
-        "econ_diff": mean_abs_diff(y_yes["econ_logits"], y_no["econ_logits"]),
-        "social_diff": mean_abs_diff(y_yes["social_logits"], y_no["social_logits"]),
-        "intensity_diff": mean_abs_diff(y_yes["intensity_logits"], y_no["intensity_logits"]),
-        "evidence_mean": probs.mean().item(),
-        "evidence_std": probs.std().item(),
+def run_forward_check(enable_evidence: bool, enable_psych: bool, offline_random_init: bool) -> Dict[str, object]:
+    model = B6EvidencePsychModel(
+        load_pretrained=not offline_random_init,
+        enable_evidence=enable_evidence,
+        enable_psych=enable_psych,
+    )
+    tokenizer = SimpleHashTokenizer() if offline_random_init else AutoTokenizer.from_pretrained("roberta-base")
+    batch = tokenizer(
+        [
+            "I support stronger labor protections and union rights.",
+            "As a conservative, I favor stricter border enforcement.",
+        ],
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=64,
+    )
+    out = model(batch["input_ids"], batch["attention_mask"])
+    payload = {
+        "enable_evidence": enable_evidence,
+        "enable_psych": enable_psych,
+        "keys": sorted(out.keys()),
+        "z_shape": tuple(out["z"].shape),
+        "has_evidence_head": "evidence_logits" in out,
+        "has_psych_heads": ("moralization_logits" in out and "identity_signaling_logits" in out),
     }
+    if "evidence_logits" in out:
+        sampled_labels = torch.randint(0, 2, out["evidence_logits"].shape)
+        metrics = token_prf1(out["evidence_logits"], sampled_labels, batch["attention_mask"])
+        payload["token_prf1_sampled"] = metrics
+    return payload
 
-def run_psych_ablation(model_cls, enc, tokenizer=None, print_tokens=True):
-    """
-    model_cls: class (e.g., B6HierarchyDraft)
-    enc: tokenizer output dict (input_ids, attention_mask)
-    tokenizer: optional, for qualitative token print
-    """
 
-    torch.manual_seed(42)
-    model_no = model_cls(psych=True)
-    torch.manual_seed(42)
-    model_yes = model_cls(psych=True)
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gold-annotations-csv", type=Path, default=Path("outputs/annotation_60k/gold_annotations.csv"))
+    parser.add_argument("--offline-random-init", action="store_true")
+    parser.add_argument("--output-json", type=Path, default=Path("outputs/model_runs/task27_28_head_checks.json"))
+    args = parser.parse_args()
 
-    model_no.psych_scale.data.fill_(0.0)
-    model_yes.psych_scale.data.fill_(1.0)
-
-    model_no.eval()
-    model_yes.eval()
-
-    with torch.no_grad():
-        y_no = model_no(**enc)
-        y_yes = model_yes(**enc)
-
-    print("\n=== Psychology Ablation ===")
-
-    print("\n[Representation]")
-    print("z diff:", mean_abs_diff(y_yes["z"], y_no["z"]))
-
-    print("\n[Ideology logits]")
-    print(f"Economic Difference: {mean_abs_diff(y_yes['econ_logits'], y_no['econ_logits'])}")
-    print(f"Social Difference: {mean_abs_diff(y_yes['social_logits'], y_no['social_logits'])}")
-    print(f"Intensity Difference: {mean_abs_diff(y_yes['intensity_logits'], y_no['intensity_logits'])}")
-
-    print(f"Economic Relative Difference: {rel_diff(y_yes['econ_logits'], y_no['econ_logits'])}")
-    print(f"Social Relative Difference: {rel_diff(y_yes['social_logits'], y_no['social_logits'])}")
-    print(f"Intensity Relative Difference: {rel_diff(y_yes['intensity_logits'], y_no['intensity_logits'])}")
-
-    print(f"Economic Signed Shift: {signed_diff(y_yes['econ_logits'], y_no['econ_logits'])}")
-    print(f"Social Signed Shift: {signed_diff(y_yes['social_logits'], y_no['social_logits'])}")
-    print(f"Intensity Signed Shift: {signed_diff(y_yes['intensity_logits'], y_no['intensity_logits'])}")
-
-    m_probs = y_yes["moralization_probs"]
-    id_probs = y_yes["identity_signaling_probs"]
-    print("\n[Moralization stats]")
-    print("mean:", m_probs.mean().item())
-    print("std :", m_probs.std().item())
-    print("sum per example:", m_probs.sum(dim=1).squeeze(-1))
-
-    print("\n[Identity Signaling stats]")
-    print("mean:", id_probs.mean().item())
-    print("std :", id_probs.std().item())
-    print("sum per example:", id_probs.sum(dim=1).squeeze(-1))
-
-    # if tokenizer is not None and print_tokens:
-    #     print("\n[Token-level evidence (example 0)]")
-    #     tokens = tokenizer.convert_ids_to_tokens(enc["input_ids"][0])
-    #     m_scores = m_probs[0].squeeze(-1).cpu().numpy()
-
-    #     for t, s in zip(tokens, m_scores):
-    #         t_clean = t.replace("Ġ", "")
-    #         print(f"{t_clean:15} {s:.3f}")
-
-    #     id_scores = id_probs[0].squeeze(-1).cpu().numpy()
-
-    #     for t, s in zip(tokens, id_scores):
-    #         t_clean = t.replace("Ġ", "")
-    #         print(f"{t_clean:15} {s:.3f}")
-
-    print("Moralization probs:", m_probs[0])
-    print("Identity probs:", id_probs[0])
-
-    return {
-        "z_diff": mean_abs_diff(y_yes["z"], y_no["z"]),
-        "econ_diff": mean_abs_diff(y_yes["econ_logits"], y_no["econ_logits"]),
-        "social_diff": mean_abs_diff(y_yes["social_logits"], y_no["social_logits"]),
-        "intensity_diff": mean_abs_diff(y_yes["intensity_logits"], y_no["intensity_logits"]),
-        "moralization_mean": m_probs.mean().item(),
-        "moralization_std": m_probs.std().item(),
-        "identity_signaling_mean": id_probs.mean().item(),
-        "identity_signaling_std": id_probs.std().item(),
+    label_stats = check_gold_psych_labels(args.gold_annotations_csv)
+    base = run_forward_check(enable_evidence=True, enable_psych=True, offline_random_init=args.offline_random_init)
+    no_ev = run_forward_check(enable_evidence=False, enable_psych=True, offline_random_init=args.offline_random_init)
+    no_ps = run_forward_check(enable_evidence=True, enable_psych=False, offline_random_init=args.offline_random_init)
+    payload = {
+        "gold_label_stats": label_stats,
+        "full_model": base,
+        "ablation_no_evidence": no_ev,
+        "ablation_no_psych": no_ps,
     }
+    args.output_json.parent.mkdir(parents=True, exist_ok=True)
+    args.output_json.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+    print(json.dumps(payload, indent=2, ensure_ascii=True))
 
-def graph_evidence_ablation(model_cls, enc):
-    torch.manual_seed(42)
-    model = model_cls(weighted=True)
-    model.eval()
-
-    results = []
-
-    with torch.no_grad():
-        # baseline (scale = 0)
-        model.psych_scale.data.fill_(0.0)
-        y_base = model(**enc)
-
-        for s in torch.linspace(0, 1, steps=11):
-            model.psych_scale.data.fill_(s.item())
-            y = model(**enc)
-
-            entry = {
-                "scale": s.item(),
-                "z_diff": (y["z"] - y_base["z"]).abs().mean().item(),
-                "econ_diff": (y["econ_logits"] - y_base["econ_logits"]).abs().mean().item(),
-                "social_diff": (y["social_logits"] - y_base["social_logits"]).abs().mean().item(),
-                "intensity_diff": (y["intensity_logits"] - y_base["intensity_logits"]).abs().mean().item(),
-                "econ_signed": (y["econ_logits"] - y_base["econ_logits"]).mean().item(),
-                "social_signed": (y["social_logits"] - y_base["social_logits"]).mean().item(),
-                "intensity_signed": (y["intensity_logits"] - y_base["intensity_logits"]).mean().item(),
-                "econ_rel": rel_diff(y["econ_logits"], y_base["econ_logits"]),
-                "social_rel": rel_diff(y["social_logits"], y_base["social_logits"]),
-                "intensity_rel": rel_diff(y["intensity_logits"], y_base["intensity_logits"]),
-            }
-
-            results.append(entry)
-
-    df = pd.Dataframe(results)
-
-    os.makedirs('../Graphs', exist_ok=True)
-    f = df.plot(x="scale", y=["econ_diff", "social_diff", "intensity_diff"])
-    fig = f.get_figure()
-    fig.savefig("Evidence Ablation.jpeg")
-
-    f = df.plot(x="scale", y=["econ_signed", "social_signed", "intensity_signed"])
-    fig = f.get_figure()
-    fig.savefig("Evidence Ablation (Signed).jpeg")
-
-    f = df.plot(x="scale", y=["econ_rel", "social_rel", "intensity_rel"])
-    fig = f.get_figure()
-    fig.savefig("Evidence Ablation (Relative).jpeg")
-
-def graph_psych_ablation(model_cls, enc):
-    torch.manual_seed(42)
-    model = model_cls(psych=True)
-    model.eval()
-
-    results = []
-
-    with torch.no_grad():
-        # baseline (scale = 0)
-        model.psych_scale.data.fill_(0.0)
-        y_base = model(**enc)
-
-        for s in torch.linspace(0, 1, steps=11):
-            model.psych_scale.data.fill_(s.item())
-            y = model(**enc)
-
-            entry = {
-                "scale": s.item(),
-                "z_diff": (y["z"] - y_base["z"]).abs().mean().item(),
-                "econ_diff": (y["econ_logits"] - y_base["econ_logits"]).abs().mean().item(),
-                "social_diff": (y["social_logits"] - y_base["social_logits"]).abs().mean().item(),
-                "intensity_diff": (y["intensity_logits"] - y_base["intensity_logits"]).abs().mean().item(),
-                "econ_signed": (y["econ_logits"] - y_base["econ_logits"]).mean().item(),
-                "social_signed": (y["social_logits"] - y_base["social_logits"]).mean().item(),
-                "intensity_signed": (y["intensity_logits"] - y_base["intensity_logits"]).mean().item(),
-                "econ_rel": rel_diff(y["econ_logits"], y_base["econ_logits"]),
-                "social_rel": rel_diff(y["social_logits"], y_base["social_logits"]),
-                "intensity_rel": rel_diff(y["intensity_logits"], y_base["intensity_logits"]),
-            }
-
-            results.append(entry)
-
-    df = pd.Dataframe(results)
-
-    os.makedirs('../Graphs', exist_ok=True)
-    f = df.plot(x="scale", y=["econ_diff", "social_diff", "intensity_diff"])
-    fig = f.get_figure()
-    fig.savefig("Psychology Ablation.jpeg")
-
-    f = df.plot(x="scale", y=["econ_signed", "social_signed", "intensity_signed"])
-    fig = f.get_figure()
-    fig.savefig("Psychology Ablation (Signed).jpeg")
-
-    f = df.plot(x="scale", y=["econ_rel", "social_rel", "intensity_rel"])
-    fig = f.get_figure()
-    fig.savefig("Psychology Ablation (Relative).jpeg")
 
 if __name__ == "__main__":
-    model = B6HierarchyDraft()
-
-    tokenizer = AutoTokenizer.from_pretrained("roberta-base")
-
-    # batch = {
-    #     "input_ids": torch.ones((2, 16), dtype=torch.long),
-    #     "attention_mask": torch.ones((2, 16), dtype=torch.long),
-    # }
-    texts = [
-        "The government should raise taxes on corporations.",
-        "I think social programs are too expensive and inefficient."
-    ]
-    enc = tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
-    evidence_results = run_evidence_ablation(B6HierarchyDraft, enc, tokenizer)
-    psych_results = run_psych_ablation(B6HierarchyDraft, enc, tokenizer)
+    main()

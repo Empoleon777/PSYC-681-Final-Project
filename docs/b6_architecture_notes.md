@@ -1,8 +1,8 @@
 # B6 Draft Notes
 
-Current state of the model in [b6_ideology_model.py](/Users/jacobkim/PSYC-681-Final-Project/models/b6_ideology_model.py):
+Current state of the model in [b6_hierarchy.py](/Users/jacobkim/PSYC-681-Final-Project/models/b6_hierarchy.py):
 
-Implemented:
+What is already implemented:
 
 1. shared transformer encoder (`roberta-base`)
 2. discourse heads: relevance, target, stance, frame
@@ -17,12 +17,16 @@ Implemented:
    - ideology heads use an explicit KL soft-label objective
    - ambiguity-heavy subset metrics are logged during validation
 9. training summary/checkpoint outputs for stage-wise comparisons
+10. consistency regularization toggle for weak pretraining (`--consistency-weight`)
+11. confidence-based curriculum toggle for weak pretraining (`--enable-curriculum`)
+12. calibration + abstention analysis (`calibration_summary.json`)
+13. continuous signal/vector-field analysis script:
+   - [analyze_b6_signal_field.py](/Users/jacobkim/PSYC-681-Final-Project/scripts/analyze_b6_signal_field.py)
 
 Training entry point:
 - [train_b6_representation.py](/Users/jacobkim/PSYC-681-Final-Project/scripts/train_b6_representation.py)
 
-Still open:
+What is still open:
 
 1. full experiment orchestration for all evaluation regimes (topic/community/platform shift)
-2. richer calibration analysis (`ECE`, per-task calibration plots)
-3. production-scale checkpoint selection and tracking
+2. production-scale checkpoint selection and tracking

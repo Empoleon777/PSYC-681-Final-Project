@@ -37,18 +37,18 @@ class B6HierarchyModel(nn.Module):
             self.encoder = RobertaModel(cfg)
         hidden = self.encoder.config.hidden_size
 
-        # Discourse-level heads.
+        # Level A heads.
         self.relevance_head = nn.Linear(hidden, 2)
         self.target_head = nn.Linear(hidden, num_targets)
         self.stance_head = nn.Linear(hidden, num_stances)
         self.frame_head = nn.Linear(hidden, num_frames)
 
-        # Intermediate representations used by the ideology projection layer.
+        # Level A intermediate representations for ideology projection.
         self.target_repr = nn.Linear(num_targets, latent_dim)
         self.stance_repr = nn.Linear(num_stances, latent_dim)
         self.frame_repr = nn.Linear(num_frames, latent_dim)
 
-        # Projection into latent ideology vector z(x).
+        # Latent ideology projection z(x).
         self.ideology_projection = nn.Sequential(
             nn.Linear(hidden + 3 * latent_dim, latent_dim),
             nn.GELU(),
@@ -57,11 +57,11 @@ class B6HierarchyModel(nn.Module):
             nn.GELU(),
         )
 
-        # Ideology-level heads.
+        # Level B heads.
         self.econ_head = nn.Linear(latent_dim, 3)
         self.social_head = nn.Linear(latent_dim, 3)
         self.intensity_head = nn.Linear(latent_dim, 3)
-        self.ambiguity_head = nn.Linear(latent_dim, 1)
+        self.ambiguity_head = nn.Linear(latent_dim, 3)
 
     def orthogonality_regularization(self) -> torch.Tensor:
         """Encourage decorrelated Level B head directions."""
@@ -77,11 +77,11 @@ class B6HierarchyModel(nn.Module):
         gram = weights @ weights.T
         identity = torch.eye(gram.size(0), device=gram.device)
         return ((gram - identity) ** 2).mean()
-    
-    def compute_loss(self, outputs, labels):
-        loss_dict = {}
 
-        def kl_loss(logits, target_probs):
+    def compute_loss(self, outputs: Dict[str, torch.Tensor], labels: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        loss_dict: Dict[str, torch.Tensor] = {}
+
+        def kl_loss(logits: torch.Tensor, target_probs: torch.Tensor) -> torch.Tensor:
             log_probs = F.log_softmax(logits, dim=-1)
             return F.kl_div(log_probs, target_probs, reduction="batchmean")
 
@@ -91,10 +91,8 @@ class B6HierarchyModel(nn.Module):
 
         p = labels["econ_dist"]
         entropy = -(p * torch.log(p + 1e-8)).sum(dim=-1)
-
         bins = torch.bucketize(entropy, torch.tensor([0.5, 1.0], device=entropy.device))
         ambiguity_target = F.one_hot(bins, num_classes=3).float()
-
         loss_amb = kl_loss(outputs["ambiguity_logits"], ambiguity_target)
 
         total_loss = (
@@ -105,14 +103,15 @@ class B6HierarchyModel(nn.Module):
             + 0.1 * outputs["orthogonality_loss"]
         )
 
-        loss_dict.update({
-            "loss": total_loss,
-            "econ": loss_econ,
-            "social": loss_social,
-            "intensity": loss_intensity,
-            "ambiguity": loss_amb,
-        })
-
+        loss_dict.update(
+            {
+                "loss": total_loss,
+                "econ": loss_econ,
+                "social": loss_social,
+                "intensity": loss_intensity,
+                "ambiguity": loss_amb,
+            }
+        )
         return loss_dict
 
     def forward(
@@ -125,13 +124,13 @@ class B6HierarchyModel(nn.Module):
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
         pooled = outputs.last_hidden_state[:, 0]
 
-        # Discourse-level predictions.
+        # Level A predictions.
         relevance_logits = self.relevance_head(pooled)
         target_logits = self.target_head(pooled)
         stance_logits = self.stance_head(pooled)
         frame_logits = self.frame_head(pooled)
 
-        # Convert discourse logits into intermediate representations.
+        # Level A to intermediate representations.
         target_probs = F.softmax(target_logits, dim=-1)
         stance_probs = F.softmax(stance_logits, dim=-1)
         frame_probs = F.softmax(frame_logits, dim=-1)
@@ -140,17 +139,17 @@ class B6HierarchyModel(nn.Module):
         stance_h = self.stance_repr(stance_probs)
         frame_h = self.frame_repr(frame_probs)
 
-        # Project pooled encoder state and discourse representations into z.
+        # Ideology projection from pooled encoder + discourse intermediates.
         z_input = torch.cat([pooled, target_h, stance_h, frame_h], dim=-1)
         z = self.ideology_projection(z_input)
 
-        # Ideology predictions from z.
+        # Level B predictions from z.
         econ_logits = self.econ_head(z)
         social_logits = self.social_head(z)
         intensity_logits = self.intensity_head(z)
         ambiguity_logits = self.ambiguity_head(z)
 
-        out = {
+        out: Dict[str, torch.Tensor] = {
             "relevance_logits": relevance_logits,
             "target_logits": target_logits,
             "stance_logits": stance_logits,
@@ -169,25 +168,20 @@ class B6HierarchyModel(nn.Module):
             out["frame_h"] = frame_h
 
         if labels is not None:
-            loss_dict = self.compute_loss(out, labels)
-            out.update(loss_dict)
+            out.update(self.compute_loss(out, labels))
 
         return out
 
 
+# Backwards-compatible alias for older code paths.
+B6HierarchyDraft = B6HierarchyModel
+
+
 if __name__ == "__main__":
-    model = B6HierarchyModel()
+    model = B6HierarchyModel(load_pretrained=False)
     batch = {
         "input_ids": torch.ones((2, 16), dtype=torch.long),
         "attention_mask": torch.ones((2, 16), dtype=torch.long),
     }
     y = model(**batch)
-<<<<<<<< HEAD:models/b6_ideology_model.py
     print("Forward pass keys:", sorted(y.keys()))
-
-
-# Backwards-compatible alias for older imports.
-B6HierarchyDraft = B6HierarchyModel
-========
-    print("Forward pass keys:", sorted(y.keys()))
->>>>>>>> origin/main:models/b6_hierarchy.py
