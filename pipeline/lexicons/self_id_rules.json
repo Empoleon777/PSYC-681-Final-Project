@@ -1,0 +1,52 @@
+{
+  "rules": [
+    {
+      "name": "self_decl_conservative",
+      "patterns": [
+        "i am conservative",
+        "i'm conservative",
+        "as a conservative",
+        "i lean right"
+      ],
+      "zecon": 0.75,
+      "zsoc": 0.7,
+      "confidence": 0.8
+    },
+    {
+      "name": "self_decl_liberal",
+      "patterns": [
+        "i am liberal",
+        "i'm liberal",
+        "as a liberal",
+        "i lean left",
+        "progressive here"
+      ],
+      "zecon": -0.7,
+      "zsoc": -0.7,
+      "confidence": 0.8
+    },
+    {
+      "name": "self_decl_libertarian",
+      "patterns": [
+        "i am libertarian",
+        "i'm libertarian",
+        "as a libertarian"
+      ],
+      "zecon": 0.85,
+      "zsoc": -0.2,
+      "confidence": 0.78
+    },
+    {
+      "name": "self_decl_socialist",
+      "patterns": [
+        "i am socialist",
+        "i'm socialist",
+        "as a socialist",
+        "i am a socialist"
+      ],
+      "zecon": -0.85,
+      "zsoc": -0.2,
+      "confidence": 0.8
+    }
+  ]
+}

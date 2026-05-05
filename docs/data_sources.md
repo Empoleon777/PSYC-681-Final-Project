@@ -20,4 +20,4 @@ Related upstream reference:
 1. Pushshift Reddit Dataset
 - https://doi.org/10.5281/zenodo.3608135
 
-Link checks were last run on `2026-04-21`.
+Link checks were last confirmed on `2026-04-21`.
