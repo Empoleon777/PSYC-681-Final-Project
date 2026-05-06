@@ -148,7 +148,7 @@ def make_counterfactuals(df, n_per_type=50):
         "cue_removal": n_per_type,
     }
 
-    shuffled = df.sample(frac=1, random_state=42)
+    shuffled = df.sample(frac=1, replace=False, random_state=42)
 
     for _, row in shuffled.iterrows():
         if all(v == 0 for v in types_needed.values()):
