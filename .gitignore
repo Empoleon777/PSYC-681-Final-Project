@@ -14,6 +14,9 @@ logs/
 # LFS-pointered model checkpoints (don't commit pointer files; use real LFS or external storage)
 roberta-mitweet/checkpoint-*/
 
+# Pretrained-model caches (large; not redistributed)
+models/.cache/
+
 # Local Postgres scratch data
 /tmp/psyc681_pgdata
 
