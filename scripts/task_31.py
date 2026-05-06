@@ -9,21 +9,32 @@ from difflib import SequenceMatcher
 TARGET_MAP = {
     "corporations": "wealthy individuals",
     "immigrants": "citizens",
-    "police": "teachers",
-    "capitalism": "communism",
+    "police": "law enforcement",
+    "capitalism": "the free market",
+    "medicare": "healthcare",
+    "islamist": "radical",
+    "global warming": "climate change",
+    "Catholic": "Christian",
 }
 
 STANCE_RULES = [
-    ("should", "should not"),
-    ("is", "is not"),
-    ("are", "are not"),
+    # ("should", "should not"),
+    # ("is", "is not"),
+    # ("are", "are not"),
     ("too expensive", "worth the cost"),
     ("senseless", "necessary"),    
     ("reckless", "strategic"),
     ("stupid", "smart"),
     ("dumb", "smart"),
     ("foolish", "smart"),
+    ("smart", "stupid"),
     ("insane", "rational"),
+    ("should be allowed", "should not be allowed"),
+    ("should be banned", "should be allowed"),
+    ("is harmful", "is beneficial"),
+    ("is bad", "is good"),
+    ("should be discouraged", "should be encouraged"),
+    ("dangerous", "safe"),
 ]
 
 FRAME_INSERTS = {
@@ -31,13 +42,25 @@ FRAME_INSERTS = {
     "fairness": "to ensure fairness",
     "efficiency": "to increase efficiency",
     "security": "to increase public safety",
+    "health": "for the benefit of public health",
+    "diversity": "for the sake of creating a safe environment",
+    "military": "for the defense of our nation"
 }
 
 CUE_WORDS_AND_PHRASES = [
     "morally", "disgusting", "unfair", "evil",
     "as a citizen", "as a taxpayer", "we must",
     "we should", "insane", "stupid", "dumb", 
-    "foolish", "traitor", "asset", "shill"
+    "foolish", "traitor", "asset", "shill", "liar",
+    "crook", "snake", "dumbass", "retard", "psycho",
+    "crank", "racist", "sexist", "moron", "cult",
+    "fake news", "dishonest", "wack job", "crank",
+    "motherfucker", "idiot", "lunatic", "commie",
+    "libtard", "MAGAt", "chud", "woke", "DEI", "baby killer",
+    "rightoid", "drumpf", "incompetent", "unhinged", "deranged",
+    "dictator", "despot", "fascist", "zealot", "autocrat", "comrade",
+    "ruin the country", "ruin this country", "christian nationalism", 
+    "christian nationalist"
 ]
 
 ACTION_WORDS = ["should", "must", "need", "have to", "require"]
@@ -65,12 +88,17 @@ def apply_frame_inserts(text):
     items = list(FRAME_INSERTS.values())
     random.shuffle(items)
     frame = items[0]
-        
-    if text.endswith("."):
-        return text[:-1] + f", {frame}."
-    else:
-        return frame + " " + text
-        
+
+    prefix_or_suffix = random.randint(0, 2)
+    
+    if prefix_or_suffix == 0:
+        if text.endswith('.') or text.endswith('!') or text.endswith('?'):
+            return f"{text[:-1]}, {frame}."
+        else: 
+            return f"{text}, {frame}."
+    else: 
+        return f"{frame}, text"
+
 def remove_cue_words(text):
     cues = copy.deepcopy(CUE_WORDS_AND_PHRASES)
     random.shuffle(cues)
@@ -169,6 +197,9 @@ def make_counterfactuals(df, n_per_type=50):
     
     print(f"Edits: {counts}")
     cf_set = pd.DataFrame(rows)
+    cf_set = cf_set[
+        cf_set["original_text"].str.strip() != cf_set["edited_text"].str.strip()
+    ]
     os.makedirs('Data/counterfactuals', exist_ok=True)
     cf_set.to_csv("Data/counterfactuals/cf_set.csv", index=False)
     return pd.DataFrame(rows)
