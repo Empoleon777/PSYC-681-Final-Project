@@ -27,7 +27,7 @@ Quick links:
 If you want to run database writes:
 
 ```bash
-export DATABASE_URL=postgresql://localhost:5432/psyc681_ideology
+export DATABASE_URL=postgresql://USERNAME_GOES_HERE:PASSWORD_GOES_HERE@localhost:5432/psyc681_ideology
 python scripts/apply_schema.py
 python scripts/db_roundtrip_check.py
 ```
@@ -138,7 +138,7 @@ python scripts/fold_annotations.py \
 To persist Task-14 outputs to PostgreSQL:
 
 ```bash
-export DATABASE_URL=postgresql://localhost:5432/psyc681_ideology
+export DATABASE_URL=postgresql://USERNAME_GOES_HERE:PASSWORD_GOES_HERE@localhost:5432/psyc681_ideology
 python scripts/fold_annotations.py \
   --annotation-glob "Data/annotation_60k/annotation_packet_annotator_*.csv" \
   --output-dir outputs/annotation_60k \
@@ -207,7 +207,7 @@ python scripts/eval.py \
 Optional DB write:
 
 ```bash
-export DATABASE_URL=postgresql://localhost:5432/psyc681_ideology
+export DATABASE_URL=postgresql://USERNAME_GOES_HERE:PASSWORD_GOES_HERE@localhost:5432/psyc681_ideology
 python scripts/eval.py \
   --predictions-csv outputs/model_runs/b1_val_predictions.csv \
   --gold-aggregates-csv outputs/annotation_60k/gold_aggregates.csv \
