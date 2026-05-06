@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -30,6 +31,7 @@ TASKS = {
 class Row:
     text: str
     labels: Dict[str, int]
+    post_id: str = ""
 
 
 class GoldDataset(Dataset):
@@ -153,7 +155,7 @@ def load_gold_rows(raw_posts_csv: Path, gold_aggregates_csv: Path) -> List[Row]:
                 break
             labels[task] = values.index(val)
         if valid:
-            rows.append(Row(text=text, labels=labels))
+            rows.append(Row(text=text, labels=labels, post_id=g["post_id"]))
     return rows
 
 
@@ -206,6 +208,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--output-json", type=Path, default=Path("outputs/model_runs/b2_summary.json"))
+    parser.add_argument(
+        "--output-predictions-csv",
+        type=Path,
+        default=None,
+        help="Optional path to dump per-post val-set predictions for Task 35 error analysis.",
+    )
     args = parser.parse_args()
 
     rows = load_gold_rows(args.raw_posts_csv, args.gold_aggregates_csv)
@@ -265,6 +273,90 @@ def main() -> None:
     }
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    if args.output_predictions_csv is not None:
+        write_b2_val_predictions(model, val_rows, tokenizer, args.max_length, args.batch_size, device, args.output_predictions_csv)
+        print(f"Wrote per-post val predictions to {args.output_predictions_csv}")
+
+    # Reproducibility manifest.
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from scripts._run_manifest import build_manifest, write_manifest
+
+    manifest = build_manifest(
+        run_name=f"b2_seed{args.seed}",
+        seed=args.seed,
+        inputs={
+            "raw_posts_csv": args.raw_posts_csv,
+            "gold_aggregates_csv": args.gold_aggregates_csv,
+        },
+        outputs={
+            "summary_json": str(args.output_json),
+            "val_predictions_csv": str(args.output_predictions_csv) if args.output_predictions_csv else None,
+        },
+        config={
+            "encoder_name": args.encoder_name,
+            "offline_random_init": args.offline_random_init,
+            "batch_size": args.batch_size,
+            "max_length": args.max_length,
+            "epochs": args.epochs,
+            "learning_rate": lr,
+        },
+        extra={"n_train": len(train_rows), "n_val": len(val_rows)},
+    )
+    manifest_path = args.output_json.with_name(args.output_json.stem + "_manifest.json")
+    write_manifest(manifest_path, manifest)
+    print(f"Wrote run manifest to {manifest_path}")
+
+
+@torch.no_grad()
+def write_b2_val_predictions(
+    model: B2FlatModel,
+    val_rows: List[Row],
+    tokenizer,
+    max_length: int,
+    batch_size: int,
+    device: torch.device,
+    output_csv: Path,
+) -> None:
+    model.eval()
+    val_ds = GoldDataset(val_rows, tokenizer, max_length)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    all_preds: Dict[str, List[int]] = {t: [] for t in TASKS}
+    all_probs: Dict[str, List[List[float]]] = {t: [] for t in TASKS}
+    for batch in val_loader:
+        logits = model(
+            input_ids=batch["input_ids"].to(device),
+            attention_mask=batch["attention_mask"].to(device),
+        )
+        for task in TASKS:
+            l = logits[task].detach().cpu()
+            probs = torch.softmax(l, dim=-1)
+            preds = l.argmax(dim=-1).tolist()
+            all_preds[task].extend(preds)
+            all_probs[task].extend(probs.tolist())
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["post_id", "split_name", "model_name"]
+    for task in TASKS:
+        fieldnames += [f"pred_{task}", f"probs_{task}"]
+    with open(output_csv, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for i, rec in enumerate(val_rows):
+            row: Dict[str, str] = {
+                "post_id": rec.post_id,
+                "split_name": "val",
+                "model_name": "b2",
+            }
+            for task, (_, values) in TASKS.items():
+                pred_idx = all_preds[task][i]
+                row[f"pred_{task}"] = values[pred_idx] if 0 <= pred_idx < len(values) else ""
+                row[f"probs_{task}"] = json.dumps(
+                    {values[j]: float(p) for j, p in enumerate(all_probs[task][i])},
+                    ensure_ascii=True,
+                )
+            writer.writerow(row)
 
 
 if __name__ == "__main__":

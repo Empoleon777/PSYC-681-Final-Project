@@ -634,6 +634,44 @@ def main() -> None:
     if args.output_predictions_csv is not None:
         write_val_predictions(model, gold_val, tokenizer, args.max_length, args.batch_size, device, tasks, args.variant, args.output_predictions_csv)
 
+    # Reproducibility manifest.
+    import sys as _sys
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+    if str(REPO_ROOT) not in _sys.path:
+        _sys.path.insert(0, str(REPO_ROOT))
+    from scripts._run_manifest import build_manifest, write_manifest
+
+    manifest = build_manifest(
+        run_name=f"{args.variant}_seed{args.seed}",
+        seed=args.seed,
+        inputs={
+            "raw_posts_csv": args.raw_posts_csv,
+            "weak_labels_csv": args.weak_labels_csv,
+            "gold_aggregates_csv": args.gold_aggregates_csv,
+        },
+        outputs={
+            "summary_json": str(args.output_json),
+            "val_predictions_csv": str(args.output_predictions_csv) if args.output_predictions_csv else None,
+        },
+        config={
+            "variant": args.variant,
+            "encoder_name": args.encoder_name,
+            "offline_random_init": args.offline_random_init,
+            "max_length": args.max_length,
+            "batch_size": args.batch_size,
+            "weak_epochs": args.weak_epochs,
+            "gold_epochs": args.gold_epochs,
+        },
+        extra={
+            "weak_records": len(weak_data),
+            "gold_train_records": len(gold_train),
+            "gold_val_records": len(gold_val),
+        },
+    )
+    manifest_path = args.output_json.with_name(args.output_json.stem + "_manifest.json")
+    write_manifest(manifest_path, manifest)
+    print(f"Wrote run manifest to {manifest_path}")
+
 
 @torch.no_grad()
 def write_val_predictions(

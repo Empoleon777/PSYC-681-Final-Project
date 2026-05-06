@@ -149,6 +149,12 @@ def main() -> None:
     ap.add_argument("--model-name", type=str, default="model")
     ap.add_argument("--output-dir", type=Path, required=True)
     ap.add_argument("--top-k-errors", type=int, default=5)
+    ap.add_argument(
+        "--min-support",
+        type=int,
+        default=1,
+        help="Drop subreddit/topic strata with fewer than this many evaluated rows. Use a larger value (e.g. 30) on real data to avoid toy-noise patterns.",
+    )
     args = ap.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -196,6 +202,10 @@ def main() -> None:
         raise SystemExit(f"No overlap between {args.predictions_csv} and gold for model={args.model_name}")
 
     # 1) Per-task macro/per-class F1 + confusion matrix.
+    # macro_f1_all_labels treats unsupported classes as 0 (the standard but
+    # often misleading view); macro_f1_supported_labels averages only over
+    # classes that actually appear in y_true. When val splits don't cover
+    # every class, the second view is what you usually want to trust.
     per_task: Dict[str, Dict[str, object]] = {}
     for task, (_, values) in TASK_SPECS.items():
         ys = [(str(r[f"gold_{task}"]), str(r[f"pred_{task}"])) for r in records if r[f"available_{task}"]]
@@ -205,15 +215,25 @@ def main() -> None:
         y_true = [a for a, _ in ys]
         y_pred = [b for _, b in ys]
         f1_per = safe_macro_f1_per_class(y_true, y_pred, values)
-        macro_f1 = float(statistics.mean(f1_per.values())) if f1_per else 0.0
+        support_per_class = dict(Counter(y_true))
+        supported_labels = [v for v in values if support_per_class.get(v, 0) > 0]
+        macro_f1_all = float(statistics.mean(f1_per.values())) if f1_per else 0.0
+        macro_f1_supported = (
+            float(statistics.mean(f1_per[l] for l in supported_labels))
+            if supported_labels
+            else 0.0
+        )
         n_correct = sum(1 for a, b in ys if a == b)
         per_task[task] = {
             "available": True,
             "n": len(ys),
-            "macro_f1": round(macro_f1, 4),
+            "macro_f1_all_labels": round(macro_f1_all, 4),
+            "macro_f1_supported_labels": round(macro_f1_supported, 4),
+            "n_supported_labels": len(supported_labels),
+            "n_total_labels": len(values),
             "accuracy": round(n_correct / len(ys), 4),
             "per_class_f1": {k: round(v, 4) for k, v in f1_per.items()},
-            "support_per_class": dict(Counter(y_true)),
+            "support_per_class": support_per_class,
             "confusion_matrix": confusion(y_true, y_pred, values),
         }
 
@@ -279,7 +299,9 @@ def main() -> None:
             ),
         }
 
-    # 5) Stratified error rate by subreddit + topic.
+    # 5) Stratified error rate by subreddit + topic. Strata with n < min_support
+    # are dropped from the reported view but still reported under
+    # _below_min_support so the caller can see how much was dropped.
     def stratify(field: str, task: str) -> Dict[str, Dict[str, object]]:
         bucket: Dict[str, Dict[str, int]] = defaultdict(lambda: {"n": 0, "errors": 0})
         for r in records:
@@ -289,14 +311,26 @@ def main() -> None:
             bucket[key]["n"] += 1
             if not r[f"correct_{task}"]:
                 bucket[key]["errors"] += 1
-        return {
-            k: {
+        kept: Dict[str, Dict[str, object]] = {}
+        below: int = 0
+        below_n_rows: int = 0
+        for k, v in sorted(bucket.items(), key=lambda kv: -kv[1]["errors"]):
+            entry = {
                 "n": v["n"],
                 "errors": v["errors"],
                 "error_rate": round(v["errors"] / v["n"], 4) if v["n"] > 0 else None,
             }
-            for k, v in sorted(bucket.items(), key=lambda kv: -kv[1]["errors"])
+            if v["n"] >= args.min_support:
+                kept[k] = entry
+            else:
+                below += 1
+                below_n_rows += v["n"]
+        kept["_below_min_support"] = {
+            "n_strata_dropped": below,
+            "n_rows_dropped": below_n_rows,
+            "min_support": args.min_support,
         }
+        return kept
 
     strata = {
         "by_subreddit": {task: stratify("subreddit", task) for task in IDEOLOGY_TASKS},
@@ -381,18 +415,52 @@ def main() -> None:
     summary_path = args.output_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8")
 
+    # Reproducibility manifest.
+    import sys as _sys
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+    if str(REPO_ROOT) not in _sys.path:
+        _sys.path.insert(0, str(REPO_ROOT))
+    from scripts._run_manifest import build_manifest, write_manifest
+
+    manifest = build_manifest(
+        run_name=f"error_analysis_{args.model_name}",
+        seed=None,
+        inputs={
+            "predictions_csv": args.predictions_csv,
+            "gold_aggregates_csv": args.gold_aggregates_csv,
+            "raw_posts_csv": args.raw_posts_csv,
+        },
+        outputs={
+            "summary_json": str(summary_path),
+            "errors_csv": str(errors_csv),
+            "stage_decomposition_csv": str(stage_csv),
+            "per_class_f1_csv": str(per_class_csv),
+        },
+        config={"top_k_errors": args.top_k_errors, "min_support": args.min_support},
+        extra={"n_records": len(records)},
+    )
+    write_manifest(args.output_dir / "run_manifest.json", manifest)
+
     # Short stdout digest.
     print(f"=== Error analysis: {args.model_name} ===")
     print(f"records analyzed: {len(records)}")
+    print(f"{'task':22s}  {'n':>4s}  {'acc':>5s}  {'F1_all':>7s}  {'F1_supp':>7s}  {'sup/tot':>8s}")
     for task, info in per_task.items():
-        if info.get("available"):
-            print(f"  {task:22s}  n={info['n']:4d}  acc={info['accuracy']:.3f}  macro_f1={info['macro_f1']:.3f}")
+        if not info.get("available"):
+            continue
+        print(
+            f"  {task:20s}  n={info['n']:4d}  acc={info['accuracy']:.3f}  "
+            f"F1_all={info['macro_f1_all_labels']:.3f}  "
+            f"F1_supp={info['macro_f1_supported_labels']:.3f}  "
+            f"sup/tot={info['n_supported_labels']}/{info['n_total_labels']}"
+        )
     print("stage decomposition (ideology):")
     for task, b in stage_decomp.items():
         total = sum(b.values()) or 1
         proj_fail = b.get("projection_failure", 0)
         print(f"  {task:22s}  errors={total}  projection_failure={proj_fail}  ({proj_fail / total:.1%})")
     print(f"summary -> {summary_path}")
+    print(f"manifest -> {args.output_dir / 'run_manifest.json'}")
 
 
 if __name__ == "__main__":

@@ -1049,6 +1049,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weak-max-samples", type=int, default=0)
     parser.add_argument("--gold-max-samples", type=int, default=0)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--output-predictions-csv",
+        type=Path,
+        default=None,
+        help="Optional path to dump per-post val-set predictions (post_id, pred_<task>, probs_<task>) for Task 35 error analysis.",
+    )
     return parser.parse_args()
 
 
@@ -1241,6 +1247,105 @@ def main() -> None:
         encoding="utf-8",
     )
     print(f"Wrote checkpoints and summary to {args.output_dir}")
+
+    pred_csv_path = args.output_predictions_csv
+    if pred_csv_path is None:
+        pred_csv_path = args.output_dir / "stage2_val_predictions.csv"
+    if gold_val:
+        write_b6_val_predictions(
+            model=model,
+            records=gold_val,
+            tokenizer=tokenizer,
+            max_length=args.max_length,
+            batch_size=args.batch_size,
+            device=device,
+            output_csv=pred_csv_path,
+        )
+        print(f"Wrote per-post val predictions to {pred_csv_path}")
+
+    # Reproducibility manifest. Located next to the training summary so a
+    # downstream consumer can find seed / data hashes / git commit without
+    # parsing the heavyweight training_summary.json.
+    from scripts._run_manifest import build_manifest, write_manifest
+
+    manifest = build_manifest(
+        run_name=f"b6_representation_seed{args.seed}",
+        seed=args.seed,
+        inputs={
+            "raw_posts_csv": args.raw_posts_csv,
+            "weak_labels_csv": args.weak_labels_csv,
+            "gold_aggregates_csv": args.gold_aggregates_csv,
+        },
+        outputs={
+            "training_summary": str(args.output_dir / "training_summary.json"),
+            "stage1_checkpoint": str(args.output_dir / "stage1_weak_pretrained.pt"),
+            "stage2_checkpoint": str(args.output_dir / "stage2_gold_finetuned.pt"),
+            "calibration_summary": str(args.output_dir / "calibration_summary.json"),
+            "val_predictions_csv": str(pred_csv_path),
+        },
+        config=jsonable_config(args),
+        extra={
+            "stage1_n_records": len(weak_records),
+            "stage1_n_train": len(weak_train),
+            "stage1_n_val": len(weak_val),
+            "stage2_n_records": len(gold_records),
+            "stage2_n_train": len(gold_train),
+            "stage2_n_val": len(gold_val),
+        },
+    )
+    write_manifest(args.output_dir / "run_manifest.json", manifest)
+    print(f"Wrote run manifest to {args.output_dir / 'run_manifest.json'}")
+
+
+@torch.no_grad()
+def write_b6_val_predictions(
+    model: B6HierarchyModel,
+    records: List[TrainingRecord],
+    tokenizer,
+    max_length: int,
+    batch_size: int,
+    device: torch.device,
+    output_csv: Path,
+) -> None:
+    model.eval()
+    dataset = RepresentationDataset(records, tokenizer, max_length, STAGE2_TASKS)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    all_preds: Dict[str, List[int]] = {t: [] for t in STAGE2_TASKS}
+    all_probs: Dict[str, List[List[float]]] = {t: [] for t in STAGE2_TASKS}
+    for batch in loader:
+        outputs = model(
+            input_ids=batch["input_ids"].to(device),
+            attention_mask=batch["attention_mask"].to(device),
+        )
+        for task in STAGE2_TASKS:
+            logits = outputs[TASK_SPECS[task]["logits_key"]].detach().cpu()
+            probs = torch.softmax(logits, dim=-1)
+            preds = logits.argmax(dim=-1).tolist()
+            all_preds[task].extend(preds)
+            all_probs[task].extend(probs.tolist())
+
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["post_id", "split_name", "model_name"]
+    for task in STAGE2_TASKS:
+        fieldnames += [f"pred_{task}", f"probs_{task}"]
+    with open(output_csv, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for i, rec in enumerate(records):
+            row: Dict[str, str] = {
+                "post_id": rec.post_id,
+                "split_name": "val",
+                "model_name": "b6_hierarchy",
+            }
+            for task in STAGE2_TASKS:
+                values = TASK_SPECS[task]["values"]
+                pred_idx = all_preds[task][i]
+                row[f"pred_{task}"] = values[pred_idx] if 0 <= pred_idx < len(values) else ""
+                row[f"probs_{task}"] = json.dumps(
+                    {values[j]: float(p) for j, p in enumerate(all_probs[task][i])},
+                    ensure_ascii=True,
+                )
+            writer.writerow(row)
 
 
 if __name__ == "__main__":
