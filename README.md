@@ -67,6 +67,7 @@ python scripts/import_reddit_posts.py \
   --input-dir Data/sources/politosphere_raw \
   --source-dataset politosphere_2019_12_sample \
   --output-csv outputs/ingestion/raw_posts_60k.csv \
+  --topic-map-json pipeline/lexicons/subreddit_topic_map.json \
   --limit 60000
 
 python scripts/data_quality_report.py \
@@ -76,6 +77,7 @@ python scripts/data_quality_report.py \
 
 Subreddit scope notes:
 - [subreddit_scope.md](/Users/jacobkim/PSYC-681-Final-Project/docs/subreddit_scope.md)
+- [subreddit_topic_map.json](/Users/jacobkim/PSYC-681-Final-Project/pipeline/lexicons/subreddit_topic_map.json)
 
 ## Build Weak Labels
 
@@ -125,11 +127,13 @@ python scripts/fold_annotations.py \
   --annotation-glob "Data/annotation_60k/annotation_packet_annotator_*.csv" \
   --output-dir outputs/annotation_60k \
   --require-complete-labels \
-  --require-three-annotators
+  --require-three-annotators \
+  --require-evidence-spans
 ```
 
 `--require-complete-labels` enforces non-blank `q01..q11` before writing final gold outputs.
 `--require-three-annotators` enforces exactly three annotators per post.
+`--require-evidence-spans` enforces non-empty valid `evidence_spans_json` for all `q01_relevance=1` rows.
 
 To persist Task-14 outputs to PostgreSQL:
 
@@ -140,6 +144,7 @@ python scripts/fold_annotations.py \
   --output-dir outputs/annotation_60k \
   --require-complete-labels \
   --require-three-annotators \
+  --require-evidence-spans \
   --write-db
 ```
 

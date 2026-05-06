@@ -82,6 +82,23 @@ def soft_distribution(values: List[str]) -> Dict[str, float]:
     return {k: v / n for k, v in sorted(c.items())}
 
 
+def parse_evidence_spans(raw: str) -> List[Dict[str, object]]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    out: List[Dict[str, object]] = []
+    for item in payload:
+        if isinstance(item, dict):
+            out.append(item)
+    return out
+
+
 def upsert_db(
     dsn: str,
     annotations_rows: List[Dict[str, str]],
@@ -170,6 +187,11 @@ def main() -> None:
         action="store_true",
         help="Fail if any post has fewer or more than 3 annotators.",
     )
+    parser.add_argument(
+        "--require-evidence-spans",
+        action="store_true",
+        help="Fail if any relevant row (q01_relevance=1) has empty/invalid evidence_spans_json.",
+    )
     args = parser.parse_args()
 
     files = sorted(glob.glob(args.annotation_glob))
@@ -194,6 +216,9 @@ def main() -> None:
     rows_with_any_blank = 0
     field_blank_counts = {field: 0 for field in REQUIRED_QUESTION_FIELDS}
     posts_with_blank = 0
+    relevant_rows = 0
+    relevant_rows_with_valid_evidence = 0
+    relevant_rows_missing_evidence = 0
     for post_id, rows in by_post.items():
         annotators = {r["annotator_id"] for r in rows if r.get("annotator_id")}
         if len(annotators) != 3:
@@ -209,6 +234,14 @@ def main() -> None:
             if row_blank:
                 rows_with_any_blank += 1
                 post_has_blank = True
+
+            if (row.get("q01_relevance", "").strip() == "1"):
+                relevant_rows += 1
+                spans = parse_evidence_spans(row.get("evidence_spans_json", ""))
+                if spans:
+                    relevant_rows_with_valid_evidence += 1
+                else:
+                    relevant_rows_missing_evidence += 1
         if post_has_blank:
             posts_with_blank += 1
 
@@ -243,6 +276,9 @@ def main() -> None:
         "rows_with_any_blank_required_field": rows_with_any_blank,
         "posts_with_any_blank_required_field": posts_with_blank,
         "blank_counts_by_field": field_blank_counts,
+        "relevant_rows": relevant_rows,
+        "relevant_rows_with_valid_evidence": relevant_rows_with_valid_evidence,
+        "relevant_rows_missing_evidence": relevant_rows_missing_evidence,
         "input_files": files,
     }
     (args.output_dir / "gold_validation_summary.json").write_text(
@@ -267,9 +303,19 @@ def main() -> None:
             "Fix annotation rows or regenerate packet before considering Task 14 complete."
         )
 
+    if args.require_evidence_spans and relevant_rows_missing_evidence > 0:
+        raise SystemExit(
+            "Found relevant rows (q01_relevance=1) with empty or invalid evidence_spans_json. "
+            "Fill evidence spans before considering Task 14 complete."
+        )
+
     print(f"Posts aggregated: {len(by_post)}")
     print(f"Incomplete posts (not exactly 3 annotators): {incomplete}")
     print(f"Rows with blank required fields: {rows_with_any_blank}")
+    print(
+        f"Relevant rows missing evidence spans: "
+        f"{relevant_rows_missing_evidence}/{relevant_rows}"
+    )
 
 
 if __name__ == "__main__":

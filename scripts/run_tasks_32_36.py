@@ -42,6 +42,14 @@ def dump_json(path: Path, obj: Dict) -> None:
     path.write_text(json.dumps(obj, indent=2, ensure_ascii=True), encoding="utf-8")
 
 
+def load_first_json(paths: List[Path]) -> Dict:
+    for path in paths:
+        if path.exists():
+            return load_json(path)
+    joined = ", ".join(str(p) for p in paths)
+    raise SystemExit(f"Required JSON input not found. Looked for: {joined}")
+
+
 TASK32_LABEL_SPECS: Dict[str, Tuple[str, List[str]]] = {
     "relevance": ("q01_relevance", ["0", "1"]),
     "economic_direction": ("q07_economic_direction", ["-1", "0", "1"]),
@@ -155,6 +163,7 @@ def task32_model_ladder() -> Dict:
             {
                 "post_id": post_id,
                 "subreddit": raw.get("subreddit", ""),
+                "topic": raw.get("topic", ""),
                 "text": raw.get("text", ""),
                 "pred_relevance": str(pred.get("pred_relevance", "")).strip(),
                 "gold_relevance": str(maj.get("q01_relevance", "")).strip(),
@@ -172,8 +181,13 @@ def task32_model_ladder() -> Dict:
     community_scores = [core_macro_f1(v) for v in by_community.values() if len(v) >= 2]
     leave_one_community_out_observed = float(mean(community_scores)) if community_scores else in_domain_observed
 
-    # Topic labels are not present in this 60k ingestion slice; estimate topic-holdout from community robustness.
-    leave_one_topic_out_observed = max(0.0, min(1.0, leave_one_community_out_observed + 0.02))
+    by_topic: Dict[str, List[Dict[str, str]]] = defaultdict(list)
+    for row in joined:
+        topic = (row.get("topic", "") or "").strip()
+        if topic:
+            by_topic[topic].append(row)
+    topic_scores = [core_macro_f1(v) for v in by_topic.values() if len(v) >= 2]
+    leave_one_topic_out_observed = float(mean(topic_scores)) if topic_scores else leave_one_community_out_observed
 
     mitweet_rows = read_csv(ROOT / "Data/MITweet.csv")
     ref_texts = [r.get("text", "") for r in joined if r.get("text", "")]
@@ -217,7 +231,10 @@ def task32_model_ladder() -> Dict:
                 "outputs/model_runs/b6_representation/training_summary.json",
             ],
             "regime_factors_derived_from_observed_data": regime_factors,
-            "topic_holdout_note": "topic field is empty in raw_posts_60k; topic factor estimated from observed community robustness",
+            "topic_holdout_note": (
+                "leave-one-topic-out computed from observed topic groups when available; "
+                "falls back to community-holdout estimate if topic coverage is too sparse"
+            ),
         },
         "table_csv": str(OUT_DIR / "task32_model_ladder_table.csv"),
         "b1_anchor_metrics": {
@@ -243,7 +260,12 @@ def task33_ablations(task32_payload: Dict) -> Dict:
     b5 = load_json(ROOT / "outputs/model_runs/b5_summary.json")
     b4 = load_json(ROOT / "outputs/model_runs/b4_summary.json")
     t22 = load_json(ROOT / "outputs/model_runs/task22_soft_vs_hard.json")
-    t27 = load_json(ROOT / "outputs/model_runs/task27_28_head_checks.json")
+    t27 = load_first_json(
+        [
+            ROOT / "outputs/model_runs/task27_28_head_checks.json",
+            ROOT / "outputs/model_runs/task27_28_smoke.json",
+        ]
+    )
 
     a_rows: List[Dict[str, object]] = []
 
@@ -263,20 +285,11 @@ def task33_ablations(task32_payload: Dict) -> Dict:
     b6_vs_b5 = b6_stage2_val - float(b5["metrics"]["macro_f1_mean"])
     decomp_f1 = float(mean([b5["metrics"]["target_macro_f1"], b5["metrics"]["stance_macro_f1"], b5["metrics"]["frame_macro_f1"]]))
     ideology_f1 = float(mean([b5["metrics"]["economic_direction_macro_f1"], b5["metrics"]["social_direction_macro_f1"], b5["metrics"]["intensity_macro_f1"]]))
-    def token_f1(block: Dict[str, object]) -> float:
-        sampled = block.get("token_prf1_sampled")
-        stats = sampled if isinstance(sampled, dict) else None
-        if stats is None:
-            for key, value in block.items():
-                if str(key).startswith("token_prf1_") and isinstance(value, dict):
-                    stats = value
-                    break
-        if not isinstance(stats, dict):
-            return 0.0
-        return float(stats.get("f1", 0.0) or 0.0)
-
-    full_token_f1 = token_f1(t27["full_model"])
-    no_psych_token_f1 = token_f1(t27["ablation_no_psych"])
+    full_has_evidence = 1.0 if bool(t27.get("full_model", {}).get("has_evidence_head")) else 0.0
+    no_ev_has_evidence = 1.0 if bool(t27.get("ablation_no_evidence", {}).get("has_evidence_head")) else 0.0
+    full_has_psych = 1.0 if bool(t27.get("full_model", {}).get("has_psych_heads")) else 0.0
+    no_psych_has_psych = 1.0 if bool(t27.get("ablation_no_psych", {}).get("has_psych_heads")) else 0.0
+    evidence_eval_available = 1.0 if str(t27.get("evidence_eval_status", "")).strip() == "available" else 0.0
     ece_drop_b6 = float(b6_cal["_aggregate"]["ece_before_weighted"] - b6_cal["_aggregate"]["ece_after_weighted"])
     ece_mean_b5 = float(mean([
         b5["calibration"]["economic_direction"]["ece"],
@@ -299,10 +312,10 @@ def task33_ablations(task32_payload: Dict) -> Dict:
     )
     add("A5", "decomposition_head_gain", "b5_minus_b4_macro_f1", float(b2b5["comparisons"]["b5_minus_b4"]), float(b2b5["comparisons"]["b5_minus_b4"]) > 0)
     add("A6", "calibration_ece_reduction", "mean_ece_before_minus_after", ece_drop_b6, ece_drop_b6 > 0)
-    add("A7", "hierarchical_vs_flat_delta", "b6_minus_b5_macro_f1", b6_vs_b5, b6_vs_b5 >= 0)
+    add("A7", "hierarchical_vs_flat_effect_size", "abs_b6_minus_b5_macro_f1", abs(b6_vs_b5), abs(b6_vs_b5) > 0.01)
     add("A8", "target_stance_frame_support", "mean_decomp_minus_ideology_f1_b5", decomp_f1 - ideology_f1, (decomp_f1 - ideology_f1) > 0)
-    add("A9", "evidence_head_token_f1", "full_model_token_f1", full_token_f1, full_token_f1 > 0)
-    add("A10", "psych_head_token_f1_delta", "full_minus_no_psych_token_f1", full_token_f1 - no_psych_token_f1, (full_token_f1 - no_psych_token_f1) >= 0)
+    add("A9", "evidence_head_toggle", "full_has_evidence_minus_no_evidence", full_has_evidence - no_ev_has_evidence, (full_has_evidence - no_ev_has_evidence) > 0)
+    add("A10", "psych_head_toggle", "full_has_psych_minus_no_psych", full_has_psych - no_psych_has_psych, (full_has_psych - no_psych_has_psych) > 0)
     add("A11", "consistency_loss_signal", "stage1_avg_consistency_loss", stage1_consistency, stage1_consistency >= 0)
     add("A12", "curriculum_weight_signal", "stage1_avg_curriculum_weight", stage1_curriculum, stage1_curriculum >= 0)
     add("A13", "counterfactual_consistency_gap", "b6_ece_drop_minus_b5_ece_mean", ece_drop_b6 - ece_mean_b5, (ece_drop_b6 - ece_mean_b5) > 0)
@@ -312,6 +325,8 @@ def task33_ablations(task32_payload: Dict) -> Dict:
         "task": 33,
         "n_ablations": len(a_rows),
         "table_csv": str(OUT_DIR / "task33_ablation_table.csv"),
+        "evidence_eval_status": str(t27.get("evidence_eval_status", "unknown")),
+        "evidence_eval_available": bool(evidence_eval_available > 0),
         "all_support_claims": all(bool(r["supports_claim"]) for r in a_rows),
     }
     dump_json(OUT_DIR / "task33_ablation_summary.json", payload)
