@@ -540,9 +540,12 @@ def temporal_consistency_loss(
         for j in range(seq.numel() - 1):
             a = seq[j]
             b = seq[j + 1]
-            dt_seconds = torch.abs(created_ts[b] - created_ts[a]).item()
-            if dt_seconds < 0:
+            ts_a = created_ts[a].item()
+            ts_b = created_ts[b].item()
+            if ts_a < 0 or ts_b < 0:
                 dt_seconds = 0.0
+            else:
+                dt_seconds = abs(ts_b - ts_a)
             decay = math.exp(-(dt_seconds / 86400.0) / denom_days)
             penalties.append(decay * ((z[a] - z[b]) ** 2).mean())
     if not penalties:

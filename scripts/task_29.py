@@ -48,7 +48,6 @@ def split_external(df):
 def save_split(split, name):
     os.makedirs('Data/splits', exist_ok=True)
     for part, df_part in split.items():
-        print("Saving to:", os.path.abspath('../Data/splits'))
         df_part.to_csv(f"Data/splits/{name}_{part}.csv", index=False)
 
 def safe_name(s):
@@ -90,22 +89,29 @@ def build_splits(df, seed=42):
 
     return splits
 
-raw = pd.read_csv(r"outputs/annotation_60k/gold_annotations.csv")
-processed = (
-    raw
-    .groupby("post_id")
-    .agg({
-        "text": "first",
-        "q04_frame": "first",
-        "subreddit": "first"
-    })
-    .reset_index()
-    .rename(columns={
-        "q04_frame": "topic",
-        "subreddit": "community"
-    })
-)
+def main():
+    # Pull post-level fields (text, subreddit, topic) from raw_posts and the
+    # annotation labels from gold_annotations; gold_annotations alone does not
+    # carry text/subreddit/topic, so the prior implementation crashed.
+    raw_posts = pd.read_csv("outputs/ingestion/raw_posts_60k.csv")
+    gold = pd.read_csv("outputs/annotation_60k/gold_annotations.csv")
 
-processed["source"] = "internal"
+    per_post_labels = (
+        gold.groupby("post_id")
+        .agg({"q04_frame": "first"})
+        .reset_index()
+    )
 
-build_splits(processed)
+    processed = raw_posts.merge(per_post_labels, on="post_id", how="inner")
+    # Topic comes from the raw post's curated topic mapping (subreddit_topic_map);
+    # fall back to subreddit if topic is missing so leave-one-topic-out still partitions.
+    processed["topic"] = processed["topic"].fillna("").astype(str)
+    processed.loc[processed["topic"] == "", "topic"] = processed["subreddit"]
+    processed = processed.rename(columns={"subreddit": "community"})
+    processed["source"] = "internal"
+
+    build_splits(processed)
+
+
+if __name__ == "__main__":
+    main()
