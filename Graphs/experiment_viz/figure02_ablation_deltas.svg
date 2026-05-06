@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="624" viewBox="0 0 840 624">
+<style>
+text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; fill: #1b1f23; }
+.title { font-size: 20px; font-weight: 700; }
+.subtitle { font-size: 12px; fill: #5a6472; }
+.axis { font-size: 11px; fill: #3a4451; }
+.label { font-size: 12px; font-weight: 600; }
+.value { font-size: 11px; fill: #203040; }
+</style>
+<rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+<text class="title" x="28" y="40">Ablation Effect Sizes (Task 33)</text>
+<text class="subtitle" x="28" y="62">Positive bars indicate improvement/support; values are deltas from task33_ablation_table.csv</text>
+<line x1="550.0" y1="72" x2="550.0" y2="588" stroke="#9fb0c6" stroke-dasharray="4 4"/>
+<text class="axis" x="546.0" y="64" text-anchor="end">0</text>
+<text class="axis" x="306" y="103" text-anchor="end">A3 soft_label_alignment_gain</text>
+<rect x="550.0" y="86" width="1.5" height="20" rx="4" fill="#c62828" opacity="0.85"/>
+<text class="value" x="544.0" y="102" text-anchor="end">-0.000</text>
+<text class="axis" x="306" y="139" text-anchor="end">A4 ambiguity_head_soft_vs_hard</text>
+<rect x="550.0" y="122" width="1.5" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="556.0" y="138" text-anchor="start">0.000</text>
+<text class="axis" x="306" y="175" text-anchor="end">A11 consistency_loss_signal</text>
+<rect x="550.0" y="158" width="1.5" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="556.3" y="174" text-anchor="start">0.001</text>
+<text class="axis" x="306" y="211" text-anchor="end">A2 stage2_finetune_gain</text>
+<rect x="550.0" y="194" width="17.5" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="573.5" y="210" text-anchor="start">0.080</text>
+<text class="axis" x="306" y="247" text-anchor="end">A5 decomposition_head_gain</text>
+<rect x="550.0" y="230" width="35.2" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="591.2" y="246" text-anchor="start">0.160</text>
+<text class="axis" x="306" y="283" text-anchor="end">A12 curriculum_weight_signal</text>
+<rect x="550.0" y="266" width="42.5" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="598.5" y="282" text-anchor="start">0.193</text>
+<text class="axis" x="306" y="319" text-anchor="end">A1 weak_supervision_gain</text>
+<rect x="550.0" y="302" width="62.9" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="618.9" y="318" text-anchor="start">0.286</text>
+<text class="axis" x="306" y="355" text-anchor="end">A8 target_stance_frame_support</text>
+<rect x="550.0" y="338" width="110.2" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="666.2" y="354" text-anchor="start">0.501</text>
+<text class="axis" x="306" y="391" text-anchor="end">A13 counterfactual_consistency_gap</text>
+<rect x="550.0" y="374" width="111.1" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="667.1" y="390" text-anchor="start">0.505</text>
+<text class="axis" x="306" y="427" text-anchor="end">A7 hierarchical_vs_flat_effect_size</text>
+<rect x="550.0" y="410" width="112.2" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="668.2" y="426" text-anchor="start">0.510</text>
+<text class="axis" x="306" y="463" text-anchor="end">A6 calibration_ece_reduction</text>
+<rect x="550.0" y="446" width="123.0" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="679.0" y="462" text-anchor="start">0.559</text>
+<text class="axis" x="306" y="499" text-anchor="end">A9 evidence_head_toggle</text>
+<rect x="550.0" y="482" width="220.0" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="776.0" y="498" text-anchor="start">1.000</text>
+<text class="axis" x="306" y="535" text-anchor="end">A10 psych_head_toggle</text>
+<rect x="550.0" y="518" width="220.0" height="20" rx="4" fill="#2e7d32" opacity="0.85"/>
+<text class="value" x="776.0" y="534" text-anchor="start">1.000</text>
+</svg>

@@ -151,10 +151,6 @@ def make_counterfactuals(df, n_per_type=50):
     shuffled = df.sample(frac=1, replace=False, random_state=42)
 
     for _, row in shuffled.iterrows():
-        if all(v == 0 for v in types_needed.values()):
-            break
-
-    for _, row in shuffled.iterrows():
         text = row["text"]
 
         if counts["target_swap"] < n_per_type:
@@ -204,11 +200,22 @@ def make_counterfactuals(df, n_per_type=50):
     cf_set.to_csv("Data/counterfactuals/cf_set.csv", index=False)
     return pd.DataFrame(rows)
 
-data = pd.read_csv(r"outputs/annotation_60k/gold_annotations.csv")
-cf = make_counterfactuals(data)
+def main():
+    # gold_annotations.csv carries per-annotator labels but no text; pull text
+    # from raw_posts and keep one row per post_id.
+    raw_posts = pd.read_csv("outputs/ingestion/raw_posts_60k.csv")
+    gold = pd.read_csv("outputs/annotation_60k/gold_annotations.csv")
+    annotated_post_ids = gold["post_id"].drop_duplicates()
+    data = raw_posts.merge(annotated_post_ids, on="post_id", how="inner")[["post_id", "text"]]
 
-print(len(cf))
-print(cf["edit_type"].value_counts())
+    cf = make_counterfactuals(data)
 
-print("\nSample:")
-print(cf.sample(10)[["edit_type", "original_text", "edited_text"]])
+    print(len(cf))
+    if len(cf) > 0:
+        print(cf["edit_type"].value_counts())
+        print("\nSample:")
+        print(cf.sample(min(10, len(cf)))[["edit_type", "original_text", "edited_text"]])
+
+
+if __name__ == "__main__":
+    main()

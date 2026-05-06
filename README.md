@@ -10,7 +10,7 @@ This repo contains the project pipeline for:
 ## Data Sources
 
 Reference list:
-- [data_sources.md](/Users/jacobkim/PSYC-681-Final-Project/docs/data_sources.md)
+- [data_sources.md](docs/data_sources.md)
 
 Quick links:
 - MITweet: https://github.com/LST1836/MITweet
@@ -27,16 +27,16 @@ Quick links:
 If you want to run database writes:
 
 ```bash
-export DATABASE_URL=postgresql://USERNAME_GOES_HERE:PASSWORD_GOES_HERE@localhost:5432/psyc681_ideology
+export DATABASE_URL=postgresql://localhost:5432/psyc681_ideology
 python scripts/apply_schema.py
 python scripts/db_roundtrip_check.py
 ```
 
 Schema file:
-- [001_core_tables.sql](/Users/jacobkim/PSYC-681-Final-Project/sql/001_core_tables.sql)
+- [001_core_tables.sql](sql/001_core_tables.sql)
 
 Task spec:
-- [task_spec.md](/Users/jacobkim/PSYC-681-Final-Project/docs/task_spec.md)
+- [task_spec.md](docs/task_spec.md)
 
 ## Pull Source Repos
 
@@ -67,6 +67,7 @@ python scripts/import_reddit_posts.py \
   --input-dir Data/sources/politosphere_raw \
   --source-dataset politosphere_2019_12_sample \
   --output-csv outputs/ingestion/raw_posts_60k.csv \
+  --topic-map-json pipeline/lexicons/subreddit_topic_map.json \
   --limit 60000
 
 python scripts/data_quality_report.py \
@@ -75,7 +76,8 @@ python scripts/data_quality_report.py \
 ```
 
 Subreddit scope notes:
-- [subreddit_scope.md](/Users/jacobkim/PSYC-681-Final-Project/docs/subreddit_scope.md)
+- [subreddit_scope.md](docs/subreddit_scope.md)
+- [subreddit_topic_map.json](pipeline/lexicons/subreddit_topic_map.json)
 
 ## Build Weak Labels
 
@@ -94,16 +96,16 @@ Key outputs:
 
 Rule files:
 
-- [flair_priors.json](/Users/jacobkim/PSYC-681-Final-Project/pipeline/lexicons/flair_priors.json)
-- [community_axis_map.json](/Users/jacobkim/PSYC-681-Final-Project/pipeline/lexicons/community_axis_map.json)
-- [self_id_rules.json](/Users/jacobkim/PSYC-681-Final-Project/pipeline/lexicons/self_id_rules.json)
-- [target_seeds.json](/Users/jacobkim/PSYC-681-Final-Project/pipeline/lexicons/target_seeds.json)
-- [frame_seeds.json](/Users/jacobkim/PSYC-681-Final-Project/pipeline/lexicons/frame_seeds.json)
+- [flair_priors.json](pipeline/lexicons/flair_priors.json)
+- [community_axis_map.json](pipeline/lexicons/community_axis_map.json)
+- [self_id_rules.json](pipeline/lexicons/self_id_rules.json)
+- [target_seeds.json](pipeline/lexicons/target_seeds.json)
+- [frame_seeds.json](pipeline/lexicons/frame_seeds.json)
 
 ## Annotation Workflow
 
 Guidelines:
-- [annotation_manual.md](/Users/jacobkim/PSYC-681-Final-Project/docs/annotation_manual.md)
+- [annotation_manual.md](docs/annotation_manual.md)
 
 Create a batch:
 
@@ -125,29 +127,32 @@ python scripts/fold_annotations.py \
   --annotation-glob "Data/annotation_60k/annotation_packet_annotator_*.csv" \
   --output-dir outputs/annotation_60k \
   --require-complete-labels \
-  --require-three-annotators
+  --require-three-annotators \
+  --require-evidence-spans
 ```
 
 `--require-complete-labels` enforces non-blank `q01..q11` before writing final gold outputs.
 `--require-three-annotators` enforces exactly three annotators per post.
+`--require-evidence-spans` enforces non-empty valid `evidence_spans_json` for all `q01_relevance=1` rows.
 
 To persist Task-14 outputs to PostgreSQL:
 
 ```bash
-export DATABASE_URL=postgresql://USERNAME_GOES_HERE:PASSWORD_GOES_HERE@localhost:5432/psyc681_ideology
+export DATABASE_URL=postgresql://localhost:5432/psyc681_ideology
 python scripts/fold_annotations.py \
   --annotation-glob "Data/annotation_60k/annotation_packet_annotator_*.csv" \
   --output-dir outputs/annotation_60k \
   --require-complete-labels \
   --require-three-annotators \
+  --require-evidence-spans \
   --write-db
 ```
 
 ## Label Definitions
 
 Canonical label schema:
-- [label_schema.md](/Users/jacobkim/PSYC-681-Final-Project/docs/label_schema.md)
-- [mitweet_mapping.md](/Users/jacobkim/PSYC-681-Final-Project/docs/mitweet_mapping.md)
+- [label_schema.md](docs/label_schema.md)
+- [mitweet_mapping.md](docs/mitweet_mapping.md)
 
 ## B1-B5 Baselines
 
@@ -220,7 +225,7 @@ as unavailable in the output JSON.
 ## B6 Model
 
 Architecture file:
-- [b6_hierarchy.py](/Users/jacobkim/PSYC-681-Final-Project/models/b6_hierarchy.py)
+- [b6_hierarchy.py](models/b6_hierarchy.py)
 
 Train full representation-learning pipeline (weak pretraining + gold fine-tuning):
 
@@ -263,10 +268,10 @@ python scripts/analyze_b6_signal_field.py \
 ```
 
 Task-26 analysis notebook:
-- [task26_signal_analysis.ipynb](/Users/jacobkim/PSYC-681-Final-Project/notebooks/task26_signal_analysis.ipynb)
+- [task26_signal_analysis.ipynb](notebooks/task26_signal_analysis.ipynb)
 
 Notes:
-- [b6_architecture_notes.md](/Users/jacobkim/PSYC-681-Final-Project/docs/b6_architecture_notes.md)
+- [b6_architecture_notes.md](docs/b6_architecture_notes.md)
 
 ## Task 27/28 Heads
 

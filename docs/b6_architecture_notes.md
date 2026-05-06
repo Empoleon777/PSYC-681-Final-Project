@@ -1,6 +1,6 @@
 # B6 Draft Notes
 
-Current state of the model in [b6_hierarchy.py](/Users/jacobkim/PSYC-681-Final-Project/models/b6_hierarchy.py):
+Current state of the model in [b6_hierarchy.py](models/b6_hierarchy.py):
 
 What is already implemented:
 
@@ -21,10 +21,10 @@ What is already implemented:
 11. confidence-based curriculum toggle for weak pretraining (`--enable-curriculum`)
 12. calibration + abstention analysis (`calibration_summary.json`)
 13. continuous signal/vector-field analysis script:
-   - [analyze_b6_signal_field.py](/Users/jacobkim/PSYC-681-Final-Project/scripts/analyze_b6_signal_field.py)
+   - [analyze_b6_signal_field.py](scripts/analyze_b6_signal_field.py)
 
 Training entry point:
-- [train_b6_representation.py](/Users/jacobkim/PSYC-681-Final-Project/scripts/train_b6_representation.py)
+- [train_b6_representation.py](scripts/train_b6_representation.py)
 
 What is still open:
 

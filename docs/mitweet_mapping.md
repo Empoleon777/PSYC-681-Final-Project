@@ -49,5 +49,5 @@ This document explains how MITweet columns are translated into this project's la
 
 - Recommended split policy: fixed train/val/test by row-index hash.
 - Existing scripts:
-  - [RoBERTa-base-mitweet.py](/Users/jacobkim/PSYC-681-Final-Project/models/RoBERTa-base-mitweet.py)
-  - [tfidf-Task20.py](/Users/jacobkim/PSYC-681-Final-Project/models/tfidf-Task20.py)
+  - [RoBERTa-base-mitweet.py](models/RoBERTa-base-mitweet.py)
+  - [tfidf-Task20.py](models/tfidf-Task20.py)

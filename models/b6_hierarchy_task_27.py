@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from b6_hierarchy import B6HierarchyModel
+from models.b6_hierarchy import B6HierarchyModel
 
 
 def token_prf1(logits: torch.Tensor, labels: torch.Tensor, mask: torch.Tensor, threshold: float = 0.5) -> Dict[str, float]:
@@ -219,7 +219,23 @@ def check_gold_psych_labels(gold_annotations_csv: Path) -> Dict[str, int]:
     rows = read_csv(gold_annotations_csv)
     moral = sum(1 for r in rows if (r.get("q05_moralization") or "").strip() != "")
     identity = sum(1 for r in rows if (r.get("q06_identity_signaling") or "").strip() != "")
-    return {"rows_total": len(rows), "rows_with_moralization": moral, "rows_with_identity_signaling": identity}
+    evidence_rows = 0
+    for r in rows:
+        raw = (r.get("evidence_spans_json") or "").strip()
+        if not raw:
+            continue
+        try:
+            spans = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(spans, list) and len(spans) > 0:
+            evidence_rows += 1
+    return {
+        "rows_total": len(rows),
+        "rows_with_moralization": moral,
+        "rows_with_identity_signaling": identity,
+        "rows_with_evidence_spans": evidence_rows,
+    }
 
 
 def run_forward_check(enable_evidence: bool, enable_psych: bool, offline_random_init: bool) -> Dict[str, object]:
@@ -248,10 +264,6 @@ def run_forward_check(enable_evidence: bool, enable_psych: bool, offline_random_
         "has_evidence_head": "evidence_logits" in out,
         "has_psych_heads": ("moralization_logits" in out and "identity_signaling_logits" in out),
     }
-    if "evidence_logits" in out:
-        sampled_labels = torch.randint(0, 2, out["evidence_logits"].shape)
-        metrics = token_prf1(out["evidence_logits"], sampled_labels, batch["attention_mask"])
-        payload["token_prf1_sampled"] = metrics
     return payload
 
 
@@ -268,6 +280,11 @@ def main() -> None:
     no_ps = run_forward_check(enable_evidence=True, enable_psych=False, offline_random_init=args.offline_random_init)
     payload = {
         "gold_label_stats": label_stats,
+        "evidence_eval_status": (
+            "available"
+            if int(label_stats.get("rows_with_evidence_spans", 0)) > 0
+            else "unavailable_no_gold_spans"
+        ),
         "full_model": base,
         "ablation_no_evidence": no_ev,
         "ablation_no_psych": no_ps,

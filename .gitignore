@@ -1,18 +1,21 @@
-.venv/
-__pycache__/
-*.pyc
-
 # Generated pipeline artifacts
 outputs/
 Data/annotation/
 Data/annotation_60k/
-Data/counterfactuals
 Data/sources/
 Data/splits/
+Data/counterfactuals/
 
-# Other big files
-*.jsonl
-*.bz2
+# Tracking / experiment scratch (don't commit)
+mlflow.db
+mlruns/
+logs/
+
+# LFS-pointered model checkpoints (don't commit pointer files; use real LFS or external storage)
+roberta-mitweet/checkpoint-*/
+
+# Pretrained-model caches (large; not redistributed)
+models/.cache/
 
 # Local Postgres scratch data
 /tmp/psyc681_pgdata
@@ -29,12 +32,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.DS_Store
 
-.venv/
-.venv-*/
-venv/
-env/
-__pycache__/
-*.py[cod]
+# OS junk
 .DS_Store
