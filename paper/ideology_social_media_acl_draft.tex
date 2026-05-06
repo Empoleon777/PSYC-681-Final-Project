@@ -1,11 +1,9 @@
-\documentclass[11pt]{article}
+\documentclass[11pt,twocolumn]{article}
 
-% Uses ACL style when acl.sty is available; falls back to a normal article
-% layout so the draft still compiles outside the ACL template folder.
 \IfFileExists{acl.sty}{
   \usepackage[review]{acl}
 }{
-  \usepackage[margin=1in]{geometry}
+  \usepackage[margin=0.72in,columnsep=0.24in]{geometry}
   \usepackage[round]{natbib}
 }
 
@@ -17,14 +15,12 @@
 \usepackage{inconsolata}
 \usepackage{graphicx}
 \usepackage{booktabs}
-\usepackage{multirow}
 \usepackage{amsmath}
-\usepackage{subcaption}
 \IfFileExists{xurl.sty}{\usepackage{xurl}}{\usepackage{url}}
 
 \graphicspath{{figures/}}
 
-\title{Predicting Multidimensional Political Ideology from Social Media Text}
+\title{Predicting Ideology from Social Media Content Using Weakly Supervised Transformer Models}
 
 \author{Jacob Kim and Billy Fox \\
   Rochester Institute of Technology \\
@@ -34,192 +30,137 @@
 \maketitle
 
 \begin{abstract}
-We study whether social media text can support fine-grained political ideology prediction beyond a single left--right label. Our project builds a pipeline for weak supervision, disagreement-aware annotation, flat and hierarchical transformer baselines, robustness checks, and error analysis. In the completed experiments, real pretrained RoBERTa and TF--IDF baselines were evaluated on MITweet, while the full Reddit weak-supervision branch was limited by dataset access constraints. On MITweet, both baselines beat random performance, but RoBERTa did not uniformly outperform the simpler lexical baseline: it improved social-direction prediction but collapsed toward the majority neutral class on economic direction. A smaller synthetic smoke test verified the B5/B6 comparison infrastructure but showed the hierarchical B6 model underperforming the flatter B5 model under constrained training. These results suggest that class imbalance and data availability are the central bottlenecks, and that stronger ideology models need careful weighting, calibration, and shift-aware evaluation before architectural conclusions can be trusted.
+This project studies whether social media text can support fine-grained political ideology prediction beyond a single left-right label. The system design combines weak supervision, disagreement-aware annotation, flat and hierarchical transformer baselines, calibration, counterfactual checks, and error analysis. The completed real-data experiment uses MITweet with pretrained RoBERTa and TF-IDF baselines. Both models beat random performance, but RoBERTa does not uniformly outperform the lexical model: it improves social-direction prediction while collapsing toward the majority neutral class on economic direction. A smaller smoke experiment verifies the B5 and B6 comparison pipeline, but B6 underperforms B5 under constrained training. The results show that class imbalance and data access, more than architecture alone, are the central obstacles for reliable multidimensional ideology prediction.
 \end{abstract}
 
 \section{Introduction}
 
-Political ideology prediction is the task of inferring political viewpoint from language. It is useful for studying public opinion, political communication, online polarization, and how communities respond to major social issues. However, ideology in social media text is rarely a clean binary variable. A post may be economically left but socially conservative, may express stance toward a target without revealing a broader ideology, or may be ambiguous enough that reasonable annotators disagree.
+Ideology detection is the task of predicting political viewpoints from text. It matters because contemporary political discourse increasingly appears on social media platforms where researchers want to study public opinion, ideological fragmentation, political communication, and community reactions to major social issues. A useful system should do more than predict a single liberal or conservative label. Political text can express a stance toward a target, use a policy frame, mix economic and social views, or remain genuinely ambiguous.
 
-This project therefore treats ideology prediction as a multidimensional and robustness-sensitive problem. Instead of only asking whether a model can classify text as liberal or conservative, we ask whether models can predict relevance, target, stance, frame, economic direction, social direction, intensity, and ambiguity, while remaining interpretable under topic, community, and platform shift. This framing follows recent work on multifaceted ideology detection \citep{liu-etal-2023-ideology}, robust ideology prediction under biased supervision \citep{chen-etal-2023-ideology}, and disagreement-aware NLP \citep{leonardelli-etal-2025-lewidi}.
+This project asks whether weakly supervised transformer models can predict multidimensional ideology from social media text while remaining useful under topic, community, and platform shift. That question is motivated by \citet{liu-etal-2023-ideology}, who show that ideology should be modeled through multiple facets rather than collapsed into a single axis. It is also motivated by \citet{chen-etal-2023-ideology}, who show that ideology classifiers can overfit topical content and biased supervision instead of learning more stable ideological cues.
 
-Our original design combined three kinds of resources: high-quality multifaceted annotations from MITweet \citep{liu-etal-2023-ideology}, large-scale Reddit political discourse from the Reddit Politosphere \citep{hofmann-etal-2022-politosphere}, and political-compass-style weak signals from Reddit communities \citep{colacrai-etal-2024-politicalcompass}. In practice, the strongest completed empirical branch used MITweet because the Politosphere download was blocked in the available sandbox. We therefore present the Reddit weak-supervision work as implemented infrastructure and the MITweet runs as the real-data results.
+The project began with a broader Reddit-centered design. The intended pipeline used MITweet for high-quality multifaceted labels, Reddit Politosphere for broad political community data, and Reddit Political Compass signals for weak economic and social ideology supervision. In practice, the strongest completed empirical result comes from MITweet because the Politosphere download was blocked in the available environment. The Reddit weak-supervision branch is therefore presented as implemented infrastructure and smoke-tested methodology, while the MITweet experiment is the main real-data result.
 
-The main finding is not that a larger transformer automatically wins. On MITweet, RoBERTa improved over the lexical baseline for social-direction prediction but underperformed on economic direction because the economic labels were heavily imbalanced toward neutral. A smaller B5/B6 smoke experiment also found that the hierarchical B6 model underperformed the flatter B5 model when trained under very constrained settings. Taken together, the results show that evaluation and data balance matter as much as model architecture.
+The main finding is cautionary. A pretrained transformer helps when the label distribution is reasonably balanced, as it does for social direction. It fails badly when class imbalance is extreme, as it does for economic direction, where the neutral class dominates. The smaller B5 and B6 smoke experiment also shows that a richer hierarchical model is not automatically better when data and training are limited. These results support a careful interpretation: before claiming architectural gains, the project needs class-weighted or focal losses, stronger per-head balancing, and a full real-data weak-pretraining run.
 
 \section{Related Work}
 
-\subsection{Multidimensional Ideology Data}
+\citet{liu-etal-2023-ideology} introduce MITweet, a high-quality Twitter dataset annotated for ideological relevance and direction across multiple domains and facets. MITweet is central to this project because it provides direct support for multidimensional ideology prediction. \citet{hofmann-etal-2022-politosphere} introduce the Reddit Politosphere, a large text and network resource covering political discussion communities over time. That dataset motivates the project focus on community structure and out-of-community generalization.
 
-MITweet introduces a multifaceted ideology detection task with five domains and twelve ideology facets, producing 12,594 English Twitter posts annotated for both relevance and ideological direction \citep{liu-etal-2023-ideology}. This dataset is central to our evaluation because it directly supports multidimensional ideology prediction rather than a single coarse political label.
+\citet{colacrai-etal-2024-politicalcompass} study Reddit ideology through economic and social axes, which aligns closely with the economic-direction and social-direction heads in this project. \citet{rostami-etal-2025-politisky24} provide PolitiSky24, a Bluesky stance dataset centered on the 2024 U.S. presidential election. Although PolitiSky24 is stance-focused rather than a full ideology dataset, it motivates future cross-platform evaluation beyond Reddit and Twitter-style text.
 
-The Reddit Politosphere provides a large text and network resource covering more than 600 political discussion groups over 12 years \citep{hofmann-etal-2022-politosphere}. This resource motivates our community-shift and weak-supervision design, even though full access was blocked during the completed sandbox run.
+\citet{liu2019roberta} introduce RoBERTa as a strong pretrained transformer encoder for text classification. However, political prediction is especially vulnerable to shortcut learning. \citet{chen-etal-2023-ideology} argue that models trained from scarce and biased supervision should learn how ideology is expressed rather than merely memorize what topics appear in a dataset. Disagreement-aware NLP is also important for this project. \citet{leonardelli-etal-2025-lewidi} frame annotator disagreement as a meaningful learning signal, which fits political posts where ambiguity, mixed stance, and target framing can produce legitimate disagreement. \citet{chang-masterson-2020-wordorder} show that lexical and sequence models can remain competitive for political text classification, which is why simpler baselines remain necessary.
 
-The Reddit Political Compass work studies multidimensional ideology in Reddit communities through economic and social axes \citep{colacrai-etal-2024-politicalcompass}. Its framing is useful because it aligns with our economic-direction and social-direction heads. PolitiSky24 provides a Bluesky stance dataset centered on the 2024 U.S. presidential election and motivates future cross-platform evaluation \citep{rostami-etal-2025-politisky24}.
+\section{Methodology}
 
-\subsection{Models and Disagreement}
+The project models ideology through eight prediction heads: relevance, target, stance, frame, economic direction, social direction, intensity, and ambiguity. Relevance identifies whether a post is political. Target, stance, and frame describe the discourse structure of the post. Economic direction and social direction capture the multidimensional ideology axes. Intensity captures how strong the ideological signal is, and ambiguity captures uncertainty or disagreement.
 
-Transformer encoders such as RoBERTa \citep{liu2019roberta} are strong general-purpose text encoders, but prior work warns that political ideology prediction can overfit topic and dataset artifacts. \citet{chen-etal-2023-ideology} explicitly separate ideological position from neutral context and show that robustness under scarce and biased supervision is a distinct challenge.
+For the real-data branch, MITweet labels were projected into the heads that can be cleanly supported by that dataset: relevance, economic direction, and social direction. The local MITweet file contains 12,594 labeled posts. For the Reddit branch, the codebase implements ingestion, weak-label construction, gold annotation folding, counterfactual editing, model training, prediction export, calibration, paired bootstrap testing, and error analysis. The intended weak-supervision stage uses large Reddit resources to learn broader political language patterns before gold fine-tuning.
 
-Our annotation and evaluation design also follows disagreement-aware NLP. The LeWiDi shared-task series argues that disagreement can reflect meaningful variation in judgment rather than mere noise, and evaluates models that predict either population-level soft labels or annotator-specific perspectives \citep{leonardelli-etal-2025-lewidi}. This is especially relevant for political text, where ambiguity, mixed stance, and target framing can produce legitimate disagreement. Simpler text classifiers remain important baselines; prior political text classification work has shown that simpler models can remain competitive depending on the task and data regime \citep{chang-masterson-2020-wordorder}.
+B1 is a TF-IDF logistic-regression baseline. It uses balanced class weights in the real MITweet run, which becomes important for imbalanced ideology labels. B2 is a RoBERTa-base classifier fine-tuned on the available MITweet labels. B3 through B5 are flat transformer variants designed for weak pretraining and gold fine-tuning. B5 includes decomposition heads for target, stance, frame, intensity, and ambiguity. B6 is the hierarchical representation model. It maps text into a latent ideology representation and jointly predicts discourse and ideology heads.
 
-\section{Task and Data}
+The model supports both hard and soft labels. A hard label is a single target class, usually the majority annotator decision. A soft label is a probability distribution over labels, such as two annotators selecting support and one selecting mixed. Hard labels support ordinary classification training, while soft labels preserve disagreement. This matters for political text because some posts are legitimately mixed or ambiguous rather than simply mislabeled.
 
-The project defines eight prediction heads:
-\begin{enumerate}
-    \item relevance: whether the post is politically relevant;
-    \item target: the entity or institution being discussed;
-    \item stance: support, opposition, or mixed/unclear stance;
-    \item frame: the policy or value frame used in the post;
-    \item economic direction: left, neutral, or right economic ideology;
-    \item social direction: left/libertarian, neutral, or right/authoritarian social ideology;
-    \item intensity: strength of ideological signal;
-    \item ambiguity: degree of annotator uncertainty or mixed interpretation.
-\end{enumerate}
+\section{Experimental Design}
 
-For the real-data branch, we used MITweet and projected its facet-level labels into relevance, economic direction, and social direction. The local MITweet file contained 12,594 labeled posts. For the Reddit branch, the codebase implements ingestion, weak-label construction, gold annotation folding, counterfactual editing, and hierarchical training around Reddit Politosphere and Political Compass data. However, full Politosphere access through Zenodo was blocked in the sandbox, so Reddit weak-pretraining results should be treated as pipeline validation rather than completed real-data evidence.
+The original experimental design evaluated whether the final model generalized across topics, communities, and platforms. The completed real-data experiment compares B1 and B2 on MITweet with three seeds. Evaluation uses macro-F1 because the ideology labels are imbalanced. The comparison also uses paired bootstrap testing over shared validation posts, which estimates whether one model outperforms another after resampling examples with replacement. Calibration is evaluated by comparing model confidence on correct and incorrect predictions.
 
-\section{Models}
-
-\subsection{Baselines}
-
-B1 is a TF--IDF logistic-regression baseline. It is intentionally simple and serves as a check against over-claiming from transformers. In the real MITweet run, the B1 classifier used balanced class weights, which turned out to be important for imbalanced ideology labels.
-
-B2 is a RoBERTa-base classifier fine-tuned on the available real labels. It predicts the MITweet-derived heads and emits per-row predictions for downstream bootstrap testing and error analysis.
-
-B3--B5 are flat transformer variants designed for weak pretraining and gold fine-tuning. B5 includes decomposition heads for target, stance, frame, intensity, and ambiguity. B6 is the hierarchical representation model, which maps text into a latent ideology representation and predicts discourse and ideology heads jointly. B6 also includes support for soft-label training, calibration, temporal consistency regularization, curriculum weighting, and row-level prediction output.
-
-\subsection{Hard and Soft Labels}
-
-A hard label is a single target class, usually the majority annotator decision. A soft label is a distribution over possible labels, such as 2/3 support and 1/3 mixed. In this project, hard labels are used for conventional classification losses, while soft labels are used to preserve annotator disagreement. Soft labels are most useful for ambiguity-heavy political posts where treating minority annotator judgments as pure error would hide useful uncertainty.
-
-\section{Evaluation}
-
-We evaluate models with macro-F1, paired bootstrap comparison, calibration statistics, and error analysis. Macro-F1 is reported because class imbalance is severe in several ideology heads. The error-analysis script reports both all-label macro-F1 and supported-label macro-F1; the latter averages only over labels present in the evaluation split, avoiding misleading penalties from zero-support classes.
-
-For model comparison, we use paired bootstrap testing over shared validation posts. Given predictions from two models, the test repeatedly resamples post IDs and recomputes the macro-F1 difference. We report the observed difference, a 95\% confidence interval, a two-sided p-value, and whether the result supports B5 over B6, B6 over B5, or a tie.
-
-\section{Results}
-
-\subsection{Real MITweet Results}
-
-The strongest completed real-data experiment compared B1 and B2 on MITweet with three seeds. Table~\ref{tab:mitweet} shows the mean macro-F1, standard deviation, and 95\% confidence interval.
+Table~\ref{tab:mitweet} shows the real MITweet results. Both B1 and B2 beat random performance. B2 does slightly better on relevance and social direction, but B1 does substantially better on economic direction. The reason is label imbalance. Around 91\% of economic-direction labels are neutral, and the RoBERTa model largely collapses toward that majority class. The balanced lexical baseline handles this imbalance better.
 
 \begin{table}[t]
 \centering
 \small
 \begin{tabular}{lccc}
 \toprule
-Task & B1 TF--IDF & B2 RoBERTa & Random \\
+Label & B1 TF-IDF & B2 RoBERTa & Random \\
 \midrule
 Relevance & $0.708 \pm 0.077$ & $0.743 \pm 0.064$ & $\sim 0.41$ \\
-Economic direction & $0.459 \pm 0.021$ & $0.341 \pm 0.017$ & $\sim 0.21$ \\
-Social direction & $0.534 \pm 0.015$ & $0.579 \pm 0.022$ & $\sim 0.34$ \\
+Economic & $0.459 \pm 0.021$ & $0.341 \pm 0.017$ & $\sim 0.21$ \\
+Social & $0.534 \pm 0.015$ & $0.579 \pm 0.022$ & $\sim 0.34$ \\
 \midrule
 Mean & $0.567 \pm 0.033$ & $0.554 \pm 0.024$ & $0.314$ \\
 \bottomrule
 \end{tabular}
-\caption{Three-seed MITweet real-data results. Values are macro-F1 mean $\pm$ standard deviation. Both B1 and B2 beat random performance, but RoBERTa does not uniformly beat the lexical baseline.}
+\caption{Three-seed MITweet results. Values are macro-F1 mean and standard deviation.}
 \label{tab:mitweet}
 \end{table}
 
-The most stable paired-bootstrap result was that B1 significantly outperformed B2 on economic direction for all three seeds. The reason was class imbalance: about 91\% of economic-direction labels were neutral. B2 achieved strong F1 on neutral examples but near-zero F1 on the left and right classes. B1 handled this better because it used balanced class weighting. On social direction, where labels were more balanced, B2 performed better than B1 on one seed and tied on the others.
+The paired bootstrap comparison gives the same interpretation. B1 significantly beats B2 on economic direction for all three seeds. On social direction, B2 beats B1 for one seed and ties for the other two. This means the transformer is useful when the label distribution gives it enough signal, but it is not robust to imbalance by default.
 
 \begin{table}[t]
 \centering
 \small
 \begin{tabular}{lccc}
 \toprule
-Task & Correct conf. & Error conf. & Gap \\
+Label & Correct & Error & Gap \\
 \midrule
 Relevance & 0.957 & 0.849 & +0.107 \\
-Economic direction & 0.959 & 0.791 & +0.168 \\
-Social direction & 0.686 & 0.577 & +0.109 \\
+Economic & 0.959 & 0.791 & +0.168 \\
+Social & 0.686 & 0.577 & +0.109 \\
 \bottomrule
 \end{tabular}
-\caption{B2 confidence calibration summary on MITweet. Correct predictions were more confident than errors for every task, suggesting that abstention and calibration can be useful.}
+\caption{B2 confidence on correct and incorrect MITweet predictions.}
 \label{tab:confidence}
 \end{table}
 
-\subsection{B5/B6 Smoke Results}
+The confidence results in Table~\ref{tab:confidence} show that correct B2 predictions are more confident than errors for every projected MITweet label. This suggests that calibration and abstention are useful directions. The largest confidence gap occurs for economic direction, which is also where the model struggles most.
 
-The B5/B6 comparison was verified end-to-end on a small synthetic smoke setup. This run should not be interpreted as a final real-data claim, but it is useful because it confirms that row-level predictions, supported-F1 reporting, paired bootstrap, and error analysis all work.
+The B5 and B6 comparison was verified on a small synthetic smoke setup. This experiment is not a final real-data claim, but it verifies the prediction schema, supported-label macro-F1, paired bootstrap, and error analysis pipeline. Table~\ref{tab:smoke} shows that B6 underperforms B5 overall under constrained training. Relevance is similar, but B6 is weaker on the ideology heads. The paired bootstrap comparison over 20 shared validation posts supports B5 over B6 for stance, intensity, and ambiguity, while the other labels are ties.
 
 \begin{table}[t]
 \centering
 \small
 \begin{tabular}{lcc}
 \toprule
-Metric & B5 mean & B6 mean \\
+Metric & B5 & B6 \\
 \midrule
 Macro-F1 mean & 0.356 & 0.154 \\
-Relevance macro-F1 & 0.467 & 0.473 \\
-Economic-direction macro-F1 & 0.322 & 0.194 \\
-Social-direction macro-F1 & 0.222 & 0.190 \\
+Relevance & 0.467 & 0.473 \\
+Economic & 0.322 & 0.194 \\
+Social & 0.222 & 0.190 \\
 \bottomrule
 \end{tabular}
-\caption{Three-seed synthetic smoke results. B6 underperformed B5 overall under constrained training, though relevance was similar.}
+\caption{Three-seed smoke-run results for the flat and hierarchical transformer variants.}
 \label{tab:smoke}
 \end{table}
 
-In the paired bootstrap comparison over 20 shared validation posts, B5 significantly outperformed B6 for stance, intensity, and ambiguity. Relevance, target, frame, economic direction, and social direction were ties. This pattern suggests that the hierarchical model was undertrained and that the smoke setup favored simpler models.
-
-\subsection{Visualization Summary}
-
-Figure~\ref{fig:ladder} summarizes the model ladder across evaluation regimes. Figure~\ref{fig:ablation} shows the ablation deltas used in the roadmap checks. Figure~\ref{fig:robustness} summarizes robustness and counterfactual consistency tests, while Figure~\ref{fig:error-profile} shows the error-analysis profile. Figure~\ref{fig:checkpoints} records the checkpoint status snapshot from the final task bundle.
+Figures~\ref{fig:ladder} through~\ref{fig:error-profile} summarize the experiment artifacts. The heatmap shows model performance across evaluation regimes. The ablation chart shows how much individual components or diagnostics changed the measured result. The robustness panel shows noise sensitivity and counterfactual consistency. The error profile shows where failures concentrate and what content types dominate the sampled errors.
 
 \begin{figure*}[t]
     \centering
     \includegraphics[width=\linewidth]{figure01_model_ladder_heatmap.pdf}
-    \caption{Model ladder heatmap from the task 32 evaluation bundle. The figure is generated from the repository artifacts and is best read as a roadmap-level summary rather than as a substitute for the real MITweet B1/B2 table.}
+    \caption{Macro-F1 by model and evaluation regime.}
     \label{fig:ladder}
 \end{figure*}
 
 \begin{figure*}[t]
     \centering
     \includegraphics[width=\linewidth]{figure02_ablation_deltas.pdf}
-    \caption{Ablation deltas from task 33. Positive values indicate that the associated component or diagnostic supported the intended claim in the roadmap checks.}
+    \caption{Ablation deltas for model components and diagnostics.}
     \label{fig:ablation}
 \end{figure*}
 
 \begin{figure*}[t]
     \centering
     \includegraphics[width=\linewidth]{figure03_robustness_panel.pdf}
-    \caption{Robustness and counterfactual consistency checks from task 34. The counterfactual consistency numbers are heuristic in the current artifact bundle and should be replaced by direct model inference in future work.}
+    \caption{Robustness under noise and counterfactual edits.}
     \label{fig:robustness}
 \end{figure*}
 
 \begin{figure*}[t]
     \centering
     \includegraphics[width=\linewidth]{figure04_error_profile_panel.pdf}
-    \caption{Error profile summary from task 35, including failure-stage counts and content taxonomy counts.}
+    \caption{Error composition by failure type and content tag.}
     \label{fig:error-profile}
 \end{figure*}
 
-\begin{figure}[t]
-    \centering
-    \includegraphics[width=\linewidth]{figure05_checkpoint_status.pdf}
-    \caption{Checkpoint status snapshot from task 36.}
-    \label{fig:checkpoints}
-\end{figure}
-
-\section{Discussion}
-
-The main result is a cautionary one. Transformer representations helped for the more balanced social-direction task, but they did not solve class imbalance automatically. On economic direction, the B2 RoBERTa model mostly learned the majority neutral class, while the simpler B1 model benefited from explicit class weighting. This means that the real comparison was partly measuring imbalance handling rather than representational quality.
-
-The B6 smoke result should also be read carefully. B6 has a richer architecture, but richer architectures require enough data, enough training, and well-scaled losses. Under a small synthetic setup, B6 was more fragile than B5. That failure is still informative: it points to the need for class-weighted or focal losses, stronger per-head loss balancing, longer training, and real weak-pretraining data before treating B6 as a serious final model.
-
 \section{Limitations}
 
-The full Reddit weak-supervision experiment could not be completed because the Politosphere download was blocked in the sandbox. As a result, B3--B6 should be treated as implemented and smoke-tested rather than fully evaluated on the intended Reddit scale.
+The full Reddit weak-supervision experiment could not be completed because Politosphere access was blocked in the available environment. As a result, B3 through B6 should be treated as implemented and smoke-tested rather than fully evaluated on the intended Reddit scale.
 
-The MITweet experiment is real-data evidence, but it only covers the heads that can be cleanly projected from MITweet: relevance, economic direction, and social direction. It does not fully evaluate target, stance, frame, intensity, or ambiguity in the same way as the Reddit annotation schema.
+The MITweet experiment is real-data evidence, but it only covers the labels that can be cleanly projected from MITweet: relevance, economic direction, and social direction. It does not fully evaluate target, stance, frame, intensity, or ambiguity in the same way as the Reddit annotation schema.
 
-The visualizations include roadmap artifacts that summarize implemented checks. Some robustness and counterfactual consistency values are estimates or heuristic diagnostics rather than direct full-model inference under every regime. Future work should rerun those evaluations with real model predictions for each split and perturbation type.
-
-\section{Conclusion}
-
-This project built an end-to-end ideology prediction pipeline with weak supervision, disagreement-aware labels, flat and hierarchical transformer models, row-level predictions, paired bootstrap testing, calibration summaries, error analysis, and visual reporting. The completed real-data MITweet results show that both TF--IDF and RoBERTa beat random baselines, but they also show that class imbalance can make a simple balanced lexical model outperform a fine-tuned transformer on economic ideology. The B5/B6 smoke results further show that hierarchical representation learning needs more favorable training conditions before it can be judged fairly. The most important next step is therefore not another architecture change, but class-weighted or focal losses plus a full real-data rerun once the Reddit weak-supervision data is accessible.
+The visualizations summarize current artifacts, but some robustness and counterfactual consistency values are diagnostic estimates rather than direct model inference under every regime. The next experimental step is class-weighted or focal loss for the ideology heads, followed by a full real-data rerun once the Reddit weak-supervision data is reachable.
 
 \IfFileExists{acl_natbib.bst}{
   \bibliographystyle{acl_natbib}

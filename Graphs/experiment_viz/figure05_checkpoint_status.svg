@@ -9,37 +9,37 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helve
 </style>
 <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
 <text class="title" x="28" y="40">Checkpoint Status Snapshot</text>
-<text class="subtitle" x="28" y="62">Task 36 checkpoint map (status booleans from final summary)</text>
+<text class="subtitle" x="28" y="62">Checkpoint outcomes from the final experiment summary</text>
 <rect x="30" y="90" width="128" height="88" rx="10" fill="#dff3e5" stroke="#5ea776"/>
-<text class="label" x="40" y="114">A</text>
-<text class="axis" x="40" y="136">clean data and annotatio</text>
+<text class="label" x="40" y="114">Clean Data And Ann</text>
+<text class="axis" x="40" y="136">otation</text>
 <text class="value" x="40" y="160">PASS</text>
 <rect x="166" y="90" width="128" height="88" rx="10" fill="#dff3e5" stroke="#5ea776"/>
-<text class="label" x="176" y="114">B</text>
-<text class="axis" x="176" y="136">b1 beats random</text>
+<text class="label" x="176" y="114">B1 Beats Random</text>
+<text class="axis" x="176" y="136"></text>
 <text class="value" x="176" y="160">PASS</text>
 <rect x="302" y="90" width="128" height="88" rx="10" fill="#dff3e5" stroke="#5ea776"/>
-<text class="label" x="312" y="114">C</text>
-<text class="axis" x="312" y="136">b2 beats b1</text>
+<text class="label" x="312" y="114">B2 Beats B1</text>
+<text class="axis" x="312" y="136"></text>
 <text class="value" x="312" y="160">PASS</text>
 <rect x="438" y="90" width="128" height="88" rx="10" fill="#dff3e5" stroke="#5ea776"/>
-<text class="label" x="448" y="114">D</text>
-<text class="axis" x="448" y="136">weak pretraining helps</text>
+<text class="label" x="448" y="114">Weak Pretraining H</text>
+<text class="axis" x="448" y="136">elps</text>
 <text class="value" x="448" y="160">PASS</text>
 <rect x="574" y="90" width="128" height="88" rx="10" fill="#dff3e5" stroke="#5ea776"/>
-<text class="label" x="584" y="114">E</text>
-<text class="axis" x="584" y="136">hierarchical vs flat und</text>
+<text class="label" x="584" y="114">Hierarchical Vs Fl</text>
+<text class="axis" x="584" y="136">at Under Shift</text>
 <text class="value" x="584" y="160">PASS</text>
 <rect x="710" y="90" width="128" height="88" rx="10" fill="#dff3e5" stroke="#5ea776"/>
-<text class="label" x="720" y="114">F</text>
-<text class="axis" x="720" y="136">soft labels help ambigui</text>
+<text class="label" x="720" y="114">Soft Labels Help A</text>
+<text class="axis" x="720" y="136">mbiguity</text>
 <text class="value" x="720" y="160">PASS</text>
 <rect x="846" y="90" width="128" height="88" rx="10" fill="#dff3e5" stroke="#5ea776"/>
-<text class="label" x="856" y="114">G</text>
-<text class="axis" x="856" y="136">evidence plausibility ad</text>
+<text class="label" x="856" y="114">Evidence Plausibil</text>
+<text class="axis" x="856" y="136">ity Addressed</text>
 <text class="value" x="856" y="160">PASS</text>
 <rect x="982" y="90" width="128" height="88" rx="10" fill="#dff3e5" stroke="#5ea776"/>
-<text class="label" x="992" y="114">H</text>
-<text class="axis" x="992" y="136">calibration improves con</text>
+<text class="label" x="992" y="114">Calibration Improv</text>
+<text class="axis" x="992" y="136">es Confidence</text>
 <text class="value" x="992" y="160">PASS</text>
 </svg>

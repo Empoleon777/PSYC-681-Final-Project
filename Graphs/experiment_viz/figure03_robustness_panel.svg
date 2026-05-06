@@ -9,7 +9,7 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helve
 </style>
 <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
 <text class="title" x="28" y="40">Robustness and Counterfactual Consistency</text>
-<text class="subtitle" x="28" y="62">Task 34 noise stress test and flat-vs-hier consistency by edit type</text>
+<text class="subtitle" x="28" y="62">Noise stress test and flat versus hierarchical consistency by edit type</text>
 <rect x="60" y="105" width="390" height="250" fill="#fbfdff" stroke="#d4deea"/>
 <polyline points="95.0,135.0 205.0,325.0 425.0,212.0" fill="none" stroke="#1565c0" stroke-width="3"/>
 <circle cx="95.0" cy="135.0" r="4.2" fill="#1565c0"/>

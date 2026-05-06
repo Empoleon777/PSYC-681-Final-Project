@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import html
 import json
+import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -58,6 +59,13 @@ def color_for_value(v: float, vmin: float, vmax: float) -> str:
     return f"rgb({r},{g},{b})"
 
 
+def pretty_name(raw: str) -> str:
+    text = re.sub(r"^[A-Z]_", "", raw)
+    text = re.sub(r"^[A-Z][0-9]+_?", "", text)
+    text = text.replace("_", " ").strip()
+    return " ".join(piece.capitalize() for piece in text.split())
+
+
 def draw_model_ladder_heatmap() -> Path:
     path = OUT_DIR / "figure01_model_ladder_heatmap.svg"
     rows = read_csv(ROOT / "outputs" / "final_32_36" / "task32_model_ladder_table.csv")
@@ -80,8 +88,8 @@ def draw_model_ladder_heatmap() -> Path:
     width = left + cw * len(regime_order) + 40
     height = top + ch * len(models) + 80
     body: List[str] = []
-    body.append('<text class="title" x="28" y="42">Model Ladder by Evaluation Regime</text>')
-    body.append('<text class="subtitle" x="28" y="64">Macro-F1 values from outputs/final_32_36/task32_model_ladder_table.csv</text>')
+    body.append('<text class="title" x="28" y="42">Model Performance by Evaluation Regime</text>')
+    body.append('<text class="subtitle" x="28" y="64">Macro-F1 by model and evaluation setting</text>')
 
     for j, regime in enumerate(regime_order):
         x = left + j * cw + cw / 2
@@ -133,8 +141,8 @@ def draw_ablation_bars() -> Path:
     scale = (plot_w / 2 - 10) / max(1e-9, vmax)
 
     body: List[str] = []
-    body.append('<text class="title" x="28" y="40">Ablation Effect Sizes (Task 33)</text>')
-    body.append('<text class="subtitle" x="28" y="62">Positive bars indicate improvement/support; values are deltas from task33_ablation_table.csv</text>')
+    body.append('<text class="title" x="28" y="40">Ablation Deltas</text>')
+    body.append('<text class="subtitle" x="28" y="62">Positive values indicate better performance or stronger support</text>')
     body.append(f'<line x1="{zero_x:.1f}" y1="{top - 14}" x2="{zero_x:.1f}" y2="{height - 36}" stroke="#9fb0c6" stroke-dasharray="4 4"/>')
     body.append(f'<text class="axis" x="{zero_x - 4:.1f}" y="{top - 22}" text-anchor="end">0</text>')
 
@@ -146,7 +154,7 @@ def draw_ablation_bars() -> Path:
         bx = min(x0, x1)
         bw = abs(x1 - x0)
         color = "#2e7d32" if delta >= 0 else "#c62828"
-        label = f'{row["ablation_id"]} {row["name"]}'
+        label = pretty_name(row["name"])
         body.append(f'<text class="axis" x="{left - 14}" y="{y + bar_h - 3}" text-anchor="end">{esc(label)}</text>')
         body.append(f'<rect x="{bx:.1f}" y="{y}" width="{max(1.5, bw):.1f}" height="{bar_h}" rx="4" fill="{color}" opacity="0.85"/>')
         tx = x1 + 6 if delta >= 0 else x1 - 6
@@ -167,7 +175,7 @@ def draw_robustness_panel() -> Path:
     height = 430
     body: List[str] = []
     body.append('<text class="title" x="28" y="40">Robustness and Counterfactual Consistency</text>')
-    body.append('<text class="subtitle" x="28" y="62">Task 34 noise stress test and flat-vs-hier consistency by edit type</text>')
+    body.append('<text class="subtitle" x="28" y="62">Noise stress test and flat versus hierarchical consistency by edit type</text>')
 
     # left panel: noise line
     lx, ly, lw, lh = 60, 105, 390, 250
@@ -232,7 +240,7 @@ def draw_error_profile_panel() -> Path:
     width = 980
     height = 460
     body: List[str] = []
-    body.append('<text class="title" x="28" y="40">Error Composition Profile (Task 35)</text>')
+    body.append('<text class="title" x="28" y="40">Error Composition Profile</text>')
     body.append('<text class="subtitle" x="28" y="62">Stage-level failures and content taxonomy from 100 sampled error examples</text>')
 
     # stage bars
@@ -278,7 +286,7 @@ def draw_checkpoint_strip() -> Path:
     height = 220
     body: List[str] = []
     body.append('<text class="title" x="28" y="40">Checkpoint Status Snapshot</text>')
-    body.append('<text class="subtitle" x="28" y="62">Task 36 checkpoint map (status booleans from final summary)</text>')
+    body.append('<text class="subtitle" x="28" y="62">Checkpoint outcomes from the final experiment summary</text>')
 
     left = 30
     top = 90
@@ -291,8 +299,8 @@ def draw_checkpoint_strip() -> Path:
         stroke = "#5ea776" if bool(ok) else "#cc5a5a"
         badge = "PASS" if bool(ok) else "FAIL"
         body.append(f'<rect x="{x}" y="{top}" width="{tile_w}" height="{tile_h}" rx="10" fill="{fill}" stroke="{stroke}"/>')
-        body.append(f'<text class="label" x="{x + 10}" y="{top + 24}">{esc(name.split("_")[0])}</text>')
-        body.append(f'<text class="axis" x="{x + 10}" y="{top + 46}">{esc(name[2:].replace("_", " ")[:24])}</text>')
+        body.append(f'<text class="label" x="{x + 10}" y="{top + 24}">{esc(pretty_name(name)[:18])}</text>')
+        body.append(f'<text class="axis" x="{x + 10}" y="{top + 46}">{esc(pretty_name(name)[18:42])}</text>')
         body.append(f'<text class="value" x="{x + 10}" y="{top + 70}">{badge}</text>')
 
     write_svg(path, width, height, body)
@@ -308,8 +316,15 @@ def write_index(paths: List[Path]) -> Path:
         "",
         "Figures:",
     ]
+    labels = {
+        "figure01_model_ladder_heatmap.svg": "Model performance by evaluation regime",
+        "figure02_ablation_deltas.svg": "Ablation deltas",
+        "figure03_robustness_panel.svg": "Robustness and counterfactual consistency",
+        "figure04_error_profile_panel.svg": "Error composition profile",
+        "figure05_checkpoint_status.svg": "Checkpoint status snapshot",
+    }
     for p in paths:
-        lines.append(f"- [{p.name}]({p.name})")
+        lines.append(f"- [{labels.get(p.name, p.name)}]({p.name})")
     lines.append("")
     lines.append("Generator: `scripts/make_experiment_visuals.py`")
     index.write_text("\n".join(lines) + "\n", encoding="utf-8")
