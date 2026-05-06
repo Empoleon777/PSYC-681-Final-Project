@@ -3,7 +3,7 @@
 Version: `v1.0`  
 Updated: `2026-04-21`
 
-This is the shared label contract for data prep, annotation, weak supervision, and model heads.
+This is the shared label definition set for data prep, annotation, weak supervision, and model heads.
 
 ## Discourse Labels
 

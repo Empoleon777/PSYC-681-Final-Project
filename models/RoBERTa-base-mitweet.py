@@ -3,8 +3,7 @@ import torch.nn as nn
 import pandas as pd
 import numpy as np
 from datasets import load_dataset
-from transformers import AutoModel, AutoTokenizer
-from transformers import Trainer, TrainingArguments
+from transformers import AutoModel, AutoTokenizer, Trainer, TrainingArguments, TrainerCallback
 from sklearn.metrics import f1_score
 
 class MultiTaskRoberta(nn.Module):
@@ -83,6 +82,11 @@ class MultiTaskTrainer(Trainer):
         loss = domain_loss + facet_loss + ideology_loss
 
         return (loss, outputs) if return_outputs else loss
+    
+class VisualLoggerCallback(TrainerCallback):
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        if state.is_world_process_zero:
+            print(f"Metrics: \n{metrics}")
 
 def tokenize(example):
     return tokenizer(
@@ -315,13 +319,8 @@ trainer = MultiTaskTrainer(
     compute_metrics=compute_metrics,
     pos_weight_domain=pos_weight_domain,
     pos_weight_facet=pos_weight_facet,
+    callbacks=[VisualLoggerCallback()]
 )
-
-# print(train_data[0])
-# print(train_data.column_names)
-
-# print(train_data[0])
-# print(dataset["train"][0])
 
 domain_thresholds = None
 facet_thresholds = None

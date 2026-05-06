@@ -10,3 +10,25 @@ Data/sources/
 
 # Local Postgres scratch data
 /tmp/psyc681_pgdata
+
+# Python virtual environments
+.venv/
+.venv-*/
+venv/
+env/
+
+# Python cache/build junk
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+.venv/
+.venv-*/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.DS_Store

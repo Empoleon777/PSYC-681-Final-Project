@@ -46,6 +46,28 @@ class PostRow:
     raw_json: str
 
 
+def normalize_key(text: str) -> str:
+    return "".join(ch for ch in text.lower().strip() if ch.isalnum() or ch in {"_", "-"})
+
+
+def load_topic_map(path: Path) -> Dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Failed to parse topic map JSON at {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(f"Topic map at {path} must be a JSON object.")
+    out: Dict[str, str] = {}
+    for raw_k, raw_v in payload.items():
+        k = normalize_key(str(raw_k))
+        v = str(raw_v).strip()
+        if k and v:
+            out[k] = v
+    return out
+
+
 def pick_first(record: Dict[str, object], keys: Iterable[str]) -> str:
     for key in keys:
         value = record.get(key)
@@ -77,13 +99,26 @@ def choose_post_id(record: Dict[str, object], text: str) -> str:
     return f"auto_{digest}"
 
 
-def normalize_row(record: Dict[str, object], source: str) -> Optional[PostRow]:
+def choose_topic(explicit_topic: str, subreddit: str, topic_map: Dict[str, str]) -> str:
+    if explicit_topic:
+        return explicit_topic
+    if subreddit and subreddit != "unknown_subreddit":
+        mapped = topic_map.get(normalize_key(subreddit), "")
+        if mapped:
+            return mapped
+        # Guaranteed non-blank fallback so downstream split logic has a stable bucket.
+        return subreddit
+    return "unknown_topic"
+
+
+def normalize_row(record: Dict[str, object], source: str, topic_map: Dict[str, str]) -> Optional[PostRow]:
     text = pick_first(record, TEXT_KEYS)
     if text in {"[deleted]", "[removed]"} or not text:
         return None
 
-    topic = pick_first(record, TOPIC_KEYS)
-    subreddit = pick_first(record, SUBREDDIT_KEYS) or topic or "unknown_subreddit"
+    explicit_topic = pick_first(record, TOPIC_KEYS)
+    subreddit = pick_first(record, SUBREDDIT_KEYS) or explicit_topic or "unknown_subreddit"
+    topic = choose_topic(explicit_topic, subreddit, topic_map)
     user_id = pick_first(record, AUTHOR_KEYS)
     if not user_id:
         user_id = f"anon_{hashlib.sha1(text.encode('utf-8')).hexdigest()[:10]}"
@@ -230,6 +265,12 @@ def main() -> None:
     parser.add_argument("--input-dir", type=Path, required=True)
     parser.add_argument("--source-dataset", type=str, required=True)
     parser.add_argument("--output-csv", type=Path, default=Path("outputs/ingestion/raw_posts.csv"))
+    parser.add_argument(
+        "--topic-map-json",
+        type=Path,
+        default=Path("pipeline/lexicons/subreddit_topic_map.json"),
+        help="Optional subreddit->topic map used when source records do not include topic.",
+    )
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--write-db", action="store_true")
     parser.add_argument("--database-url", type=str, default=os.environ.get("DATABASE_URL", ""))
@@ -238,11 +279,12 @@ def main() -> None:
     files = discover_input_files(args.input_dir)
     if not files:
         raise SystemExit(f"No supported files found in {args.input_dir}")
+    topic_map = load_topic_map(args.topic_map_json)
 
     seen_ids = set()
     rows: List[PostRow] = []
     for record in iter_records(files):
-        parsed = normalize_row(record, source=args.source_dataset)
+        parsed = normalize_row(record, source=args.source_dataset, topic_map=topic_map)
         if not parsed:
             continue
         if parsed.post_id in seen_ids:
@@ -254,6 +296,8 @@ def main() -> None:
 
     save_csv(rows, args.output_csv)
     print(f"Wrote {len(rows)} rows to {args.output_csv}")
+    non_blank_topics = sum(1 for row in rows if row.topic.strip() != "")
+    print(f"Rows with non-blank topic: {non_blank_topics}/{len(rows)}")
 
     if args.write_db:
         if not args.database_url:
