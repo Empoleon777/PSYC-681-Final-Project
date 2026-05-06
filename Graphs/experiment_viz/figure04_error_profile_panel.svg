@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="460" viewBox="0 0 980 460">
+<style>
+text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; fill: #1b1f23; }
+.title { font-size: 20px; font-weight: 700; }
+.subtitle { font-size: 12px; fill: #5a6472; }
+.axis { font-size: 11px; fill: #3a4451; }
+.label { font-size: 12px; font-weight: 600; }
+.value { font-size: 11px; fill: #203040; }
+</style>
+<rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+<text class="title" x="28" y="40">Error Composition Profile (Task 35)</text>
+<text class="subtitle" x="28" y="62">Stage-level failures and content taxonomy from 100 sampled error examples</text>
+<rect x="60" y="105" width="390" height="280" fill="#fbfdff" stroke="#d4deea"/>
+<text class="label" x="72" y="127">Failure stage distribution</text>
+<rect x="105.0" y="145.0" width="89.3" height="210.0" fill="#ffcc80" stroke="#f4a259"/>
+<text class="value" x="149.7" y="139.0" text-anchor="middle">56</text>
+<text class="axis" x="149.7" y="377" text-anchor="middle">other</text>
+<rect x="208.3" y="265.0" width="89.3" height="90.0" fill="#ffcc80" stroke="#f4a259"/>
+<text class="value" x="253.0" y="259.0" text-anchor="middle">24</text>
+<text class="axis" x="253.0" y="377" text-anchor="middle">economic head error</text>
+<rect x="311.7" y="280.0" width="89.3" height="75.0" fill="#ffcc80" stroke="#f4a259"/>
+<text class="value" x="356.3" y="274.0" text-anchor="middle">20</text>
+<text class="axis" x="356.3" y="377" text-anchor="middle">projection failure</text>
+<rect x="510" y="105" width="420" height="280" fill="#fbfdff" stroke="#d4deea"/>
+<text class="label" x="522" y="127">Content taxonomy counts</text>
+<text class="axis" x="520" y="164.3">other</text>
+<rect x="682" y="144.0" width="230.0" height="27.0" fill="#81c784" stroke="#5fa96a"/>
+<text class="value" x="918.0" y="164.3">61</text>
+<text class="axis" x="520" y="203.3">too short</text>
+<rect x="682" y="183.0" width="75.4" height="27.0" fill="#81c784" stroke="#5fa96a"/>
+<text class="value" x="763.4" y="203.3">20</text>
+<text class="axis" x="520" y="242.3">vague or hedged</text>
+<rect x="682" y="222.0" width="26.4" height="27.0" fill="#81c784" stroke="#5fa96a"/>
+<text class="value" x="714.4" y="242.3">7</text>
+<text class="axis" x="520" y="281.4">identity signaling</text>
+<rect x="682" y="261.0" width="22.6" height="27.0" fill="#81c784" stroke="#5fa96a"/>
+<text class="value" x="710.6" y="281.4">6</text>
+<text class="axis" x="520" y="320.4">sarcasm or irony</text>
+<rect x="682" y="300.0" width="18.9" height="27.0" fill="#81c784" stroke="#5fa96a"/>
+<text class="value" x="706.9" y="320.4">5</text>
+<text class="axis" x="520" y="359.4">mixed signals</text>
+<rect x="682" y="339.0" width="3.8" height="27.0" fill="#81c784" stroke="#5fa96a"/>
+<text class="value" x="691.8" y="359.4">1</text>
+</svg>

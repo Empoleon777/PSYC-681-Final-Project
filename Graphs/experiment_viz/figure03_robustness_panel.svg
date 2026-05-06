@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="430" viewBox="0 0 980 430">
+<style>
+text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; fill: #1b1f23; }
+.title { font-size: 20px; font-weight: 700; }
+.subtitle { font-size: 12px; fill: #5a6472; }
+.axis { font-size: 11px; fill: #3a4451; }
+.label { font-size: 12px; font-weight: 600; }
+.value { font-size: 11px; fill: #203040; }
+</style>
+<rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+<text class="title" x="28" y="40">Robustness and Counterfactual Consistency</text>
+<text class="subtitle" x="28" y="62">Task 34 noise stress test and flat-vs-hier consistency by edit type</text>
+<rect x="60" y="105" width="390" height="250" fill="#fbfdff" stroke="#d4deea"/>
+<polyline points="95.0,135.0 205.0,325.0 425.0,212.0" fill="none" stroke="#1565c0" stroke-width="3"/>
+<circle cx="95.0" cy="135.0" r="4.2" fill="#1565c0"/>
+<text class="value" x="95.0" y="127.0" text-anchor="middle">0.349</text>
+<circle cx="205.0" cy="325.0" r="4.2" fill="#1565c0"/>
+<text class="value" x="205.0" y="317.0" text-anchor="middle">0.342</text>
+<circle cx="425.0" cy="212.0" r="4.2" fill="#1565c0"/>
+<text class="value" x="425.0" y="204.0" text-anchor="middle">0.346</text>
+<text class="label" x="72" y="127">Noise stress curve</text>
+<text class="axis" x="255.0" y="349" text-anchor="middle">Noise rate</text>
+<text class="axis" x="70" y="230.0" transform="rotate(-90 70 230.0)" text-anchor="middle">Macro-F1</text>
+<rect x="510" y="105" width="420" height="250" fill="#fbfdff" stroke="#d4deea"/>
+<text class="label" x="522" y="127">Counterfactual consistency</text>
+<rect x="555.0" y="145.0" width="34.8" height="180.0" fill="#90caf9" stroke="#5e92c7"/>
+<rect x="597.8" y="145.0" width="34.8" height="180.0" fill="#42a5f5" stroke="#1e88e5"/>
+<text class="axis" x="598.8" y="347" text-anchor="middle">target swap</text>
+<rect x="642.5" y="223.8" width="34.8" height="101.2" fill="#90caf9" stroke="#5e92c7"/>
+<rect x="685.2" y="222.0" width="34.8" height="103.0" fill="#42a5f5" stroke="#1e88e5"/>
+<text class="axis" x="686.2" y="347" text-anchor="middle">stance reversal</text>
+<rect x="730.0" y="220.1" width="34.8" height="104.9" fill="#90caf9" stroke="#5e92c7"/>
+<rect x="772.8" y="218.3" width="34.8" height="106.7" fill="#42a5f5" stroke="#1e88e5"/>
+<text class="axis" x="773.8" y="347" text-anchor="middle">frame change</text>
+<rect x="817.5" y="145.0" width="34.8" height="180.0" fill="#90caf9" stroke="#5e92c7"/>
+<rect x="860.2" y="145.0" width="34.8" height="180.0" fill="#42a5f5" stroke="#1e88e5"/>
+<text class="axis" x="861.2" y="347" text-anchor="middle">cue removal</text>
+<rect x="765" y="119" width="12" height="12" fill="#90caf9" stroke="#5e92c7"/>
+<text class="axis" x="782" y="129">Flat</text>
+<rect x="827" y="119" width="12" height="12" fill="#42a5f5" stroke="#1e88e5"/>
+<text class="axis" x="844" y="129">Hierarchical</text>
+</svg>
