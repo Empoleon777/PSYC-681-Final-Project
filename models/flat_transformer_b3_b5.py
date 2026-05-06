@@ -65,6 +65,7 @@ class Rec:
     soft: Dict[str, List[float]]
     soft_mask: Dict[str, int]
     ambiguity_label: int = IGNORE_INDEX
+    post_id: str = ""
 
 
 class TaskDataset(Dataset):
@@ -272,7 +273,7 @@ def build_gold_rows(
             if hard_idx != IGNORE_INDEX or has_soft:
                 labeled_any = True
         if labeled_any:
-            out.append(Rec(text=text, hard=hard, soft=soft, soft_mask=soft_mask, ambiguity_label=ambiguity_label))
+            out.append(Rec(text=text, hard=hard, soft=soft, soft_mask=soft_mask, ambiguity_label=ambiguity_label, post_id=agg.get("post_id", "")))
         if max_samples > 0 and len(out) >= max_samples:
             break
     return out
@@ -515,6 +516,8 @@ def main() -> None:
     parser.add_argument("--gold-max-samples", type=int, default=1200)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--output-predictions-csv", type=Path, default=None,
+                        help="Optional path to write per-post val-set predictions for downstream error analysis.")
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -627,6 +630,60 @@ def main() -> None:
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
     print(json.dumps(payload, indent=2, ensure_ascii=True))
+
+    if args.output_predictions_csv is not None:
+        write_val_predictions(model, gold_val, tokenizer, args.max_length, args.batch_size, device, tasks, args.variant, args.output_predictions_csv)
+
+
+@torch.no_grad()
+def write_val_predictions(
+    model: "FlatTransformer",
+    gold_val: List["Rec"],
+    tokenizer,
+    max_length: int,
+    batch_size: int,
+    device: torch.device,
+    tasks: Dict[str, Tuple[str, List[str]]],
+    variant: str,
+    out_path: Path,
+) -> None:
+    model.eval()
+    loader = DataLoader(
+        TaskDataset(gold_val, tokenizer, max_length, list(tasks.keys())),
+        batch_size=batch_size,
+        shuffle=False,
+    )
+    all_preds: Dict[str, List[int]] = {t: [] for t in tasks}
+    all_probs: Dict[str, List[List[float]]] = {t: [] for t in tasks}
+    for batch in loader:
+        out = model(
+            input_ids=batch["input_ids"].to(device),
+            attention_mask=batch["attention_mask"].to(device),
+        )
+        for task in tasks:
+            logits = out[task]
+            probs = F.softmax(logits, dim=-1).cpu().tolist()
+            preds = logits.argmax(dim=-1).cpu().tolist()
+            all_preds[task].extend(preds)
+            all_probs[task].extend(probs)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        fieldnames = ["post_id", "split_name", "model_name"]
+        for task in tasks:
+            fieldnames += [f"pred_{task}", f"probs_{task}"]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for i, rec in enumerate(gold_val):
+            row = {
+                "post_id": rec.post_id,
+                "split_name": "val",
+                "model_name": variant,
+            }
+            for task, (_, values) in tasks.items():
+                pred_idx = all_preds[task][i]
+                row[f"pred_{task}"] = values[pred_idx] if 0 <= pred_idx < len(values) else ""
+                row[f"probs_{task}"] = json.dumps({values[j]: float(p) for j, p in enumerate(all_probs[task][i])}, ensure_ascii=True)
+            writer.writerow(row)
 
 
 if __name__ == "__main__":
