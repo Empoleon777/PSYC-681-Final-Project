@@ -13,11 +13,11 @@ This document pulls together the model ladder, ablations, robustness checks, cou
 - H_calibration_improves_confidence: PASS
 
 ## Artifact Index
-- /Users/jacobkim/PSYC-681-Final-Project/outputs/final_32_36/task32_model_ladder_table.csv
-- /Users/jacobkim/PSYC-681-Final-Project/outputs/final_32_36/task33_ablation_table.csv
-- /Users/jacobkim/PSYC-681-Final-Project/outputs/final_32_36/task34_robustness_summary.json
-- /Users/jacobkim/PSYC-681-Final-Project/outputs/final_32_36/task34_counterfactual_edit_set.csv
-- /Users/jacobkim/PSYC-681-Final-Project/outputs/final_32_36/task34_counterfactual_consistency.csv
-- /Users/jacobkim/PSYC-681-Final-Project/outputs/final_32_36/task35_error_analysis_examples.csv
-- /Users/jacobkim/PSYC-681-Final-Project/outputs/final_32_36/task35_error_analysis_summary.json
-- /Users/jacobkim/PSYC-681-Final-Project/outputs/final_32_36/task36_deliverables_index.csv
+- outputs/final_32_36/task32_model_ladder_table.csv
+- outputs/final_32_36/task33_ablation_table.csv
+- outputs/final_32_36/task34_robustness_summary.json
+- outputs/final_32_36/task34_counterfactual_edit_set.csv
+- outputs/final_32_36/task34_counterfactual_consistency.csv
+- outputs/final_32_36/task35_error_analysis_examples.csv
+- outputs/final_32_36/task35_error_analysis_summary.json
+- outputs/final_32_36/task36_deliverables_index.csv

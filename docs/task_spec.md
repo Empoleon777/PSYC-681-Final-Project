@@ -5,8 +5,8 @@ Last updated: `2026-05-04`
 This page is the working reference for task labels used across data prep, annotation, and modeling.
 
 Core references:
-- [label_schema.md](/Users/jacobkim/PSYC-681-Final-Project/docs/label_schema.md)
-- [mitweet_mapping.md](/Users/jacobkim/PSYC-681-Final-Project/docs/mitweet_mapping.md)
+- [label_schema.md](docs/label_schema.md)
+- [mitweet_mapping.md](docs/mitweet_mapping.md)
 
 ## Level A Labels
 
@@ -27,10 +27,10 @@ Core references:
 
 ## MITweet Reference
 
-- Mapping notes: [mitweet_mapping.md](/Users/jacobkim/PSYC-681-Final-Project/docs/mitweet_mapping.md)
+- Mapping notes: [mitweet_mapping.md](docs/mitweet_mapping.md)
 - Scripts:
-  - [RoBERTa-base-mitweet.py](/Users/jacobkim/PSYC-681-Final-Project/models/RoBERTa-base-mitweet.py)
-  - [tfidf-Task20.py](/Users/jacobkim/PSYC-681-Final-Project/models/tfidf-Task20.py)
+  - [RoBERTa-base-mitweet.py](models/RoBERTa-base-mitweet.py)
+  - [tfidf-Task20.py](models/tfidf-Task20.py)
 
 ## Team Sign-off
 

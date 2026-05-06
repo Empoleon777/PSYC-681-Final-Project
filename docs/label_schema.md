@@ -97,4 +97,4 @@ Current mapping strategy:
 - ambiguity from disagreement and conflict signals
 
 Data links:
-- [data_sources.md](/Users/jacobkim/PSYC-681-Final-Project/docs/data_sources.md)
+- [data_sources.md](docs/data_sources.md)
