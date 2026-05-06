@@ -134,7 +134,7 @@ python scripts/fold_annotations.py \
 To persist Task-14 outputs to PostgreSQL:
 
 ```bash
-export DATABASE_URL=postgresql://localhost:5432/psyc681_ideology
+export DATABASE_URL=postgresql://USERNAME_GOES_HERE:PASSWORD_GOES_HERE@localhost:5432/psyc681_ideology
 python scripts/fold_annotations.py \
   --annotation-glob "Data/annotation_60k/annotation_packet_annotator_*.csv" \
   --output-dir outputs/annotation_60k \

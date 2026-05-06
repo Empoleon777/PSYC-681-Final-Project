@@ -133,7 +133,7 @@ def make_counterfactuals(df, n_per_type=50):
             edited = apply_target_swap(text)
             if edited:
                 ratio = edit_distance_ratio(text, edited)
-                if ratio > 0.6:
+                if 0.6 < ratio < 0.98:
                     rows.append(build_row(row, edited, "target_swap"))
                     counts["target_swap"] += 1
                     continue
@@ -142,7 +142,7 @@ def make_counterfactuals(df, n_per_type=50):
             edited = apply_stance_reversal(text)
             if edited:
                 ratio = edit_distance_ratio(text, edited)
-                if ratio > 0.6:
+                if 0.6 < ratio < 0.98:
                     rows.append(build_row(row, edited, "stance_reversal"))
                     counts["stance_reversal"] += 1
                     continue
@@ -151,7 +151,7 @@ def make_counterfactuals(df, n_per_type=50):
             edited = apply_frame_inserts(row["text"])
             if edited: 
                 ratio = edit_distance_ratio(row["text"], edited)
-                if 0.6 < ratio:
+                if 0.6 < ratio < 0.98:
                     row = build_row(row, edited, "frame_change")
                     rows.append(row)
                     counts["frame_change"] += 1                    
@@ -161,7 +161,7 @@ def make_counterfactuals(df, n_per_type=50):
             edited = remove_cue_words(row["text"])
             if edited:
                 ratio = edit_distance_ratio(row["text"], edited)
-                if 0.6 < ratio:
+                if 0.6 < ratio < 0.98:
                     row = build_row(row, edited, "cue_removal")
                     rows.append(row)
                     counts["cue_removal"] += 1
